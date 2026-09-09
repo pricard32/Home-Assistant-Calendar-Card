@@ -1724,6 +1724,10 @@ var FamilyHubCalendarCard = class extends i4 {
     this.lastDetectedLocale = this.hass?.locale?.language;
     this.activeLanguage = detectLanguage(this.hass, this.config.language);
   }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.unsubscribeWeatherForecast();
+  }
   getCardSize() {
     return this.config?.compact_mode ? 6 : 9;
   }
@@ -1784,24 +1788,41 @@ var FamilyHubCalendarCard = class extends i4 {
   refreshWeatherForecast() {
     const entity = this.config?.weather_entity;
     if (!entity) {
+      this.unsubscribeWeatherForecast();
       this.fetchedForecastEntity = "";
       this.dailyForecast = [];
       return;
     }
     if (entity === this.fetchedForecastEntity) return;
+    this.unsubscribeWeatherForecast();
     this.fetchedForecastEntity = entity;
-    void this.fetchWeatherForecast(entity);
+    this.dailyForecast = [];
+    void this.subscribeWeatherForecast(entity);
   }
-  async fetchWeatherForecast(entity) {
-    if (!this.hass?.callWS) return;
+  unsubscribeWeatherForecast() {
+    const unsubscribe = this.forecastUnsubscribe;
+    this.forecastUnsubscribe = void 0;
+    if (unsubscribe) void unsubscribe();
+  }
+  async subscribeWeatherForecast(entity) {
+    if (!this.hass?.connection?.subscribeMessage) return;
     try {
-      const response = await this.hass.callWS({
-        type: "weather/get_forecasts",
-        entity_id: [entity],
-        forecast_type: "daily"
-      });
-      if (entity !== this.config?.weather_entity) return;
-      this.dailyForecast = response?.[entity]?.forecast ?? [];
+      const unsubscribe = await this.hass.connection.subscribeMessage(
+        (message) => {
+          if (entity !== this.config?.weather_entity) return;
+          this.dailyForecast = message?.forecast ?? [];
+        },
+        {
+          type: "weather/subscribe_forecast",
+          entity_id: entity,
+          forecast_type: "daily"
+        }
+      );
+      if (entity !== this.config?.weather_entity) {
+        void unsubscribe();
+        return;
+      }
+      this.forecastUnsubscribe = unsubscribe;
     } catch {
     }
   }
@@ -1945,7 +1966,8 @@ var FamilyHubCalendarCard = class extends i4 {
     return icons[condition] || "\u{1F324}\uFE0F";
   }
   renderWeather() {
-    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return A;
+    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false || (this.config.weather_placement ?? "header") !== "sidebar")
+      return A;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return A;
     const legacyForecast = Array.isArray(weather.attributes.forecast) ? weather.attributes.forecast : [];
@@ -1976,7 +1998,8 @@ var FamilyHubCalendarCard = class extends i4 {
     </section>`;
   }
   renderWeatherBadge() {
-    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return A;
+    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false || (this.config.weather_placement ?? "header") !== "header")
+      return A;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return A;
     const unit = String(weather.attributes.temperature_unit ?? "\xB0");
@@ -2062,8 +2085,8 @@ var FamilyHubCalendarCard = class extends i4 {
       return !Number.isNaN(parsed.getTime()) && parsed.toDateString() === dayKey;
     });
   }
-  renderDayWeather(day) {
-    if (!this.config || this.config.weather_placement !== "day_cell" || this.config.show_weather === false || !this.config.weather_entity)
+  renderDayWeather(day, placements = ["day_cell"]) {
+    if (!this.config || !placements.includes(this.config.weather_placement ?? "header") || this.config.show_weather === false || !this.config.weather_entity)
       return A;
     const entry = this.forecastForDay(day);
     if (!entry) return A;
@@ -2319,12 +2342,12 @@ var FamilyHubCalendarCard = class extends i4 {
       return this.renderWeekGrid();
     }
     const events = this.visibleEvents();
-    if (!events.length)
-      return b2`<div class="empty">
-        <span class="empty-icon">🗓️</span>
-        <span>${this.t("no_events")}</span>
-      </div>`;
     if (this.config?.grouped_by_calendar) {
+      if (!events.length)
+        return b2`<div class="empty">
+          <span class="empty-icon">🗓️</span>
+          <span>${this.t("no_events")}</span>
+        </div>`;
       const groups = this.groupedEvents(events);
       return b2`<div class="event-list">
         ${[...groups.entries()].map(
@@ -2335,7 +2358,30 @@ var FamilyHubCalendarCard = class extends i4 {
       )}
       </div>`;
     }
-    return b2`<div class="event-list">${events.map((event) => this.renderEventItem(event))}</div>`;
+    return this.renderAgendaList(events);
+  }
+  renderAgendaList(events) {
+    if (!this.config) return A;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const days = gridDaysForView(this.currentDate, this.currentView, weekStartDay);
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const todayKey = (/* @__PURE__ */ new Date()).toDateString();
+    const showAgendaWeather = (this.config.weather_placement ?? "header") === "agenda";
+    return b2`<div class="agenda-list">
+      ${days.map((day) => {
+      const dayEvents = eventsOnDay(events, day);
+      const isToday = day.toDateString() === todayKey;
+      return b2`<section class="agenda-day ${isToday ? "today" : ""}">
+          <header class="agenda-day-header">
+            <span class="agenda-day-name">
+              ${new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }).format(day)}
+            </span>
+            ${showAgendaWeather ? this.renderDayWeather(day, ["agenda"]) : A}
+          </header>
+          ${dayEvents.length ? b2`<div class="event-list">${dayEvents.map((event) => this.renderEventItem(event))}</div>` : b2`<div class="empty-day">${this.t("no_events")}</div>`}
+        </section>`;
+    })}
+    </div>`;
   }
   renderModal() {
     if (!this.selectedEvent) return A;
@@ -2394,7 +2440,7 @@ var FamilyHubCalendarCard = class extends i4 {
       return b2`<ha-card
         ><div class="empty"><span class="empty-icon">⚠️</span><span>Configuration required</span></div></ha-card
       >`;
-    const title = this.config.title || "Family Hub Calendar";
+    const title = this.config.title ?? "Family Hub Calendar";
     const views = this.config.enabled_views || [];
     const theme = this.config.theme_colors ?? {};
     const density = this.config.event_density || "comfortable";
@@ -2409,36 +2455,37 @@ var FamilyHubCalendarCard = class extends i4 {
         <div class="main-column">
           ${this.config.show_header !== false ? b2`<header>
                 <div class="left">
-                  ${this.renderWeatherBadge()}
-                  <h1>${title}</h1>
-                  <span class="date-line">${this.periodLabel()}</span>
-                  ${this.activeSection === "calendar" ? this.renderCalendarLegend() : A}
+                  ${this.renderWeatherBadge()} ${title ? b2`<h1>${title}</h1>` : A}
+                </div>
+                <div class="center">
+                  <span class="period-title">${this.periodLabel()}</span>
+                  ${this.activeSection !== "tasks" ? b2`<div class="nav-group">
+                        <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>
+                          ‹
+                        </button>
+                        <button class="today-btn" @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>
+                          ${this.t("today")}
+                        </button>
+                        <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>
+                          ›
+                        </button>
+                      </div>` : A}
                 </div>
                 <div class="right">
-                  ${this.activeSection !== "tasks" ? b2`<div class="nav-group">
-                          <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>
-                            ‹
-                          </button>
-                          <button class="today-btn" @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>
-                            ${this.t("today")}
-                          </button>
-                          <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>
-                            ›
-                          </button>
-                        </div>
-                        <label class="date-jump">
-                          <input
-                            type="date"
-                            title=${this.t("jump_to_date")}
-                            @change=${(e5) => {
+                  ${this.activeSection !== "tasks" ? b2`<label class="date-jump">
+                        <input
+                          type="date"
+                          title=${this.t("jump_to_date")}
+                          @change=${(e5) => {
       const input = e5.target;
       const value = input.value ? new Date(input.value) : /* @__PURE__ */ new Date();
       if (!Number.isNaN(value.getTime())) this.currentDate = value;
     }}
-                          />
-                        </label>` : A}
+                        />
+                      </label>` : A}
                 </div>
               </header>` : A}
+          ${this.activeSection === "calendar" ? b2`<div class="legend-row">${this.renderCalendarLegend()}</div>` : A}
 
           ${this.activeSection === "calendar" ? b2`<nav class="views">
                 <div class="segmented">
@@ -2576,19 +2623,28 @@ FamilyHubCalendarCard.styles = i`
       letter-spacing: 0.01em;
     }
     header {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       gap: 12px;
-      align-items: flex-start;
-      justify-content: space-between;
-      flex-wrap: wrap;
+      align-items: center;
       margin-bottom: 12px;
       padding-bottom: 14px;
       border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.14));
     }
     .left {
-      display: grid;
-      gap: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
       min-width: 0;
+      flex-wrap: wrap;
+    }
+    .center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      text-align: center;
     }
     .weather-badge {
       display: inline-flex;
@@ -2604,25 +2660,30 @@ FamilyHubCalendarCard.styles = i`
     }
     .left h1 {
       margin: 0;
-      font-size: 1.6rem;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+    .period-title {
+      display: block;
+      font-size: 1.9rem;
       font-weight: 800;
       letter-spacing: -0.02em;
-    }
-    .date-line {
-      display: inline-flex;
-      align-self: start;
-      opacity: 0.85;
-      font-size: 0.85em;
-      font-weight: 600;
       text-transform: capitalize;
-      background: var(--fhc-accent-soft);
-      color: var(--fhc-accent, var(--primary-color));
-      padding: 4px 10px;
-      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .legend-row {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 10px;
     }
     .legend {
       display: flex;
       flex-wrap: wrap;
+      justify-content: center;
       gap: 8px;
       margin-top: 4px;
     }
@@ -2671,8 +2732,10 @@ FamilyHubCalendarCard.styles = i`
     .right {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
+      min-width: 0;
     }
     .nav-group {
       display: flex;
@@ -3009,6 +3072,33 @@ FamilyHubCalendarCard.styles = i`
       opacity: 0.55;
       font-size: 0.85em;
       padding: 6px 2px;
+    }
+    .agenda-list {
+      display: grid;
+      gap: 14px;
+    }
+    .agenda-day {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .agenda-day.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1.5px var(--fhc-accent, var(--primary-color));
+      background: var(--fhc-accent-soft);
+    }
+    .agenda-day-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .agenda-day-name {
+      font-size: 0.95em;
+      font-weight: 800;
+      text-transform: capitalize;
     }
     .time-grid {
       display: flex;

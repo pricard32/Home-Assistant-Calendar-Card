@@ -26,13 +26,14 @@ FamilyHubCalendarCard (LitElement)
 - `family-hub-calendar` (main card)
   - left-hand side panel to switch between Calendar / Tasks / Meal Planner sections
   - per-calendar visibility toggling from colored header filter chips — each chip shows the calendar's name, a live event count for the current period, and can be clicked to hide/show it (dimmed + strikethrough when hidden), instead of a separate side-panel list that could overlap the calendar grid
-  - compact weather badge (icon + current temperature) in the header, alongside a full weather panel in the sidebar
+  - compact weather badge (icon + current temperature) in the header, a full weather panel in the sidebar, per-day badges in month/week/agenda views, or nothing at all -- selectable via `weather_placement`
+  - large, centered month/year (or week/day range) label in the header, with the prev/today/next controls directly beneath it, so the current period is always the visual anchor of the page
   - navigation + animated view switching; the day/3-day/agenda vertical/horizontal layout is set from the visual editor's "layout orientation" field only, so the live card UI stays uncluttered
   - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow) with the month/year name shown in the header
   - week/work-week view rendered as a true hourly time grid: day columns with an hour ruler, events positioned and sized by their actual start/end time (overlapping events share the column width), a live "now" indicator line, and an all-day event strip above the grid — like a physical/digital wall calendar
   - merged or grouped calendars
   - large, touch-friendly, color-tinted event bubbles sized for wall-mounted touch panels, with four event-density presets (`compact`, `comfortable`, `large`, `extra_large`) — the two larger presets are tuned for big/wall-mounted displays and also control the time grid's hour row height
-  - per-day weather badge (icon + high/low) shown in month grid cells and in the week time grid's day headers when `weather_placement: day_cell` is configured; forecasts are fetched on demand via Home Assistant's `weather/get_forecasts` command so day-cell weather works even on modern HA versions that no longer expose it as a state attribute
+  - per-day weather badge (icon + high/low) shown wherever `weather_placement` targets it — the header (compact badge), the sidebar (full current + 4-day panel), each month/week day cell, or each agenda/day/3-day list's day header — fetched live via Home Assistant's `weather/subscribe_forecast` websocket subscription so it actually populates on modern HA versions that no longer expose a `forecast` state attribute
   - floating quick-add button that opens Home Assistant's native "add event" dialog for the first visible calendar
   - event modal (details, copy, delete, map launch; "Edit" opens the calendar entity's native more-info dialog since Home Assistant has no generic edit-event service)
   - tasks, meals, weather sections
@@ -57,7 +58,7 @@ Each item includes source metadata and color:
 
 ```yaml
 type: custom:family-hub-calendar
-title: Family Hub Calendar
+title: Family Hub Calendar # small brand label in the header's top-left; set to "" to hide it entirely
 calendars:
   - entity: calendar.family
     name: Family
@@ -75,7 +76,7 @@ enabled_views: [day, 3day, week, work_week, month, agenda, timeline]
 grouped_by_calendar: false
 
 weather_entity: weather.home
-weather_placement: header # header | day_cell (day_cell shows a small icon + high/low badge in each month/week day cell)
+weather_placement: header # header | sidebar | day_cell | agenda -- controls where the weather badge/forecast actually appears (only one at a time)
 
 show_tasks: true
 task_entities:
