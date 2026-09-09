@@ -29,11 +29,13 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
   }
 
   private updateCalendars(value: string): void {
+    if (!this.config) return;
+    const existing = new Map(this.config.calendars.map((calendar) => [calendar.entity, calendar]));
     const entities = value
       .split("\n")
       .map((entity) => entity.trim())
       .filter(Boolean)
-      .map((entity) => ({ entity }));
+      .map((entity) => existing.get(entity) ?? { entity });
     this.updateValue("calendars", entities);
   }
 
