@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { dateRangeForView, normalizeConfig } from "./config";
 import { detectLanguage, localize, type SupportedLanguage } from "./localize";
@@ -16,10 +16,14 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   @state() private selectedEvent?: HubEvent;
 
   private swipeStartX?: number;
+  private languageOverridden = false;
+  private lastDetectedLocale?: string;
 
   public setConfig(config: FamilyHubCalendarConfig): void {
     this.config = normalizeConfig(config);
     this.currentView = this.config.default_view || "week";
+    this.languageOverridden = false;
+    this.lastDetectedLocale = this.hass?.locale?.language;
     this.activeLanguage = detectLanguage(this.hass, this.config.language);
   }
 
@@ -39,9 +43,13 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     };
   }
 
-  protected updated(): void {
-    if (this.config) {
-      this.activeLanguage = detectLanguage(this.hass, this.config.language);
+  protected updated(changedProps: PropertyValues<this>): void {
+    if (this.config && !this.languageOverridden && changedProps.has("hass")) {
+      const hassLocale = this.hass?.locale?.language;
+      if (hassLocale !== this.lastDetectedLocale) {
+        this.lastDetectedLocale = hassLocale;
+        this.activeLanguage = detectLanguage(this.hass, this.config.language);
+      }
     }
   }
 
@@ -269,8 +277,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
         )}
         <select
           .value=${this.activeLanguage}
-          @change=${(e: Event) =>
-            (this.activeLanguage = (e.target as HTMLSelectElement).value as SupportedLanguage)}
+          @change=${(e: Event) => {
+            this.languageOverridden = true;
+            this.activeLanguage = (e.target as HTMLSelectElement).value as SupportedLanguage;
+          }}
         >
           <option value="en">English</option>
           <option value="fr">Français</option>
