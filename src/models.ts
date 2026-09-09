@@ -25,7 +25,9 @@ const DEFAULT_COLORS = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "
 
 const parseDate = (value: unknown): Date | undefined => {
   if (typeof value !== "string") return undefined;
-  const parsed = new Date(value);
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
