@@ -45,6 +45,8 @@ export interface FamilyHubCalendarConfig {
   event_density?: "comfortable" | "compact";
   compact_mode?: boolean;
   border_radius?: number;
+  show_empty_days?: boolean;
+  theme_preset?: string;
   theme_colors?: {
     background?: string;
     surface?: string;

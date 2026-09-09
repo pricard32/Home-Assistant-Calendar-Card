@@ -28,5 +28,6 @@
   "tasks": "Tâches",
   "meals": "Repas",
   "daily_summary": "Résumé du jour",
-  "no_events": "Aucun événement sur cette période"
+  "no_events": "Aucun événement sur cette période",
+  "more": "de plus"
 }

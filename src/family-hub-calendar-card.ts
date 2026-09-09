@@ -1,9 +1,17 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { dateRangeForView, normalizeConfig } from "./config";
+import { dateRangeForView, gridDaysForView, monthGridDays, normalizeConfig } from "./config";
 import { detectLanguage, localize, type SupportedLanguage } from "./localize";
-import { eventDuration, extractCalendarEvents, extractMeals, extractTasks, sortEvents, type HubEvent } from "./models";
-import type { FamilyHubCalendarConfig, HomeAssistant, LovelaceCard } from "./types";
+import {
+  eventDuration,
+  eventsOnDay,
+  extractCalendarEvents,
+  extractMeals,
+  extractTasks,
+  sortEvents,
+  type HubEvent
+} from "./models";
+import type { CalendarView, FamilyHubCalendarConfig, HomeAssistant, LovelaceCard } from "./types";
 
 @customElement("family-hub-calendar")
 export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
@@ -268,6 +276,88 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     </div>`;
   }
 
+  private jumpToDay(day: Date): void {
+    this.currentDate = new Date(day);
+    if (this.config?.enabled_views?.includes("day")) this.currentView = "day";
+  }
+
+  private renderMonthGrid() {
+    if (!this.config) return nothing;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const includeAdjacent = this.config.show_empty_days !== false;
+    const days = monthGridDays(this.currentDate, weekStartDay, includeAdjacent);
+    const events = this.allEvents();
+    const weeks: Date[][] = [];
+    for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const weekdayLabels = days.slice(0, 7).map((day) => new Intl.DateTimeFormat(locale, { weekday: "short" }).format(day));
+    const todayKey = new Date().toDateString();
+    const currentMonth = this.currentDate.getMonth();
+
+    return html`<div class="month-grid">
+      <div class="month-grid-header">${weekdayLabels.map((label) => html`<span>${label}</span>`)}</div>
+      ${weeks.map(
+        (week) => html`<div class="month-grid-row">
+          ${week.map((day) => {
+            const dayEvents = eventsOnDay(events, day);
+            const isOutside = day.getMonth() !== currentMonth;
+            const isToday = day.toDateString() === todayKey;
+            const visible = dayEvents.slice(0, 3);
+            const extra = dayEvents.length - visible.length;
+            return html`<div class="month-cell ${isOutside ? "outside" : ""} ${isToday ? "today" : ""}">
+              <button class="month-cell-date" @click=${() => this.jumpToDay(day)}>${day.getDate()}</button>
+              <div class="month-cell-events">
+                ${visible.map(
+                  (event) => html`<button
+                    class="cell-event"
+                    style=${`--event-color:${event.calendarColor}`}
+                    title=${event.title}
+                    @click=${(e: Event) => {
+                      e.stopPropagation();
+                      this.selectedEvent = event;
+                    }}
+                  >
+                    <span class="cell-dot"></span>${event.title}
+                  </button>`
+                )}
+                ${extra > 0 ? html`<span class="cell-more">+${extra} ${this.t("more")}</span>` : nothing}
+              </div>
+            </div>`;
+          })}
+        </div>`
+      )}
+    </div>`;
+  }
+
+  private renderWeekGrid() {
+    if (!this.config) return nothing;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const days = gridDaysForView(this.currentDate, this.currentView as CalendarView, weekStartDay);
+    const events = this.allEvents();
+    const todayKey = new Date().toDateString();
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+
+    return html`<div class="week-grid">
+      ${days.map((day) => {
+        const dayEvents = eventsOnDay(events, day);
+        const isToday = day.toDateString() === todayKey;
+        return html`<section class="week-day ${isToday ? "today" : ""}">
+          <header class="week-day-header">
+            <span class="week-day-name">
+              ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
+            </span>
+            <span class="week-day-count">${dayEvents.length}</span>
+          </header>
+          <div class="week-day-events">
+            ${dayEvents.length
+              ? dayEvents.map((event) => this.renderEventItem(event))
+              : html`<div class="empty-day">${this.t("no_events")}</div>`}
+          </div>
+        </section>`;
+      })}
+    </div>`;
+  }
+
   private renderEventItem(event: HubEvent) {
     const isToday = new Date().toDateString() === event.start.toDateString();
     return html`<button
@@ -288,6 +378,11 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   }
 
   private renderEvents() {
+    if (this.currentView === "month") return this.renderMonthGrid();
+    if ((this.currentView === "week" || this.currentView === "work_week") && this.config?.show_empty_days !== false) {
+      return this.renderWeekGrid();
+    }
+
     const events = this.visibleEvents();
     if (!events.length)
       return html`<div class="empty">
@@ -646,6 +741,133 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     .group {
       display: grid;
       gap: 6px;
+    }
+    .month-grid {
+      display: grid;
+      gap: 4px;
+    }
+    .month-grid-header {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      font-size: 0.75em;
+      font-weight: 600;
+      opacity: 0.6;
+      text-transform: uppercase;
+      text-align: center;
+      padding-bottom: 4px;
+    }
+    .month-grid-row {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .month-cell {
+      min-height: 84px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 10px;
+      padding: 4px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 2px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .month-cell.outside {
+      opacity: 0.4;
+    }
+    .month-cell.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1px var(--fhc-accent, var(--primary-color));
+    }
+    .month-cell-date {
+      justify-self: end;
+      border: none;
+      background: transparent;
+      color: inherit;
+      font-weight: 600;
+      font-size: 0.85em;
+      cursor: pointer;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+    }
+    .month-cell.today .month-cell-date {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+    }
+    .month-cell-events {
+      display: grid;
+      gap: 2px;
+      align-content: start;
+      overflow: hidden;
+    }
+    .cell-event {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      font-size: 0.72em;
+      padding: 1px 2px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell-event:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .cell-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--event-color, var(--fhc-accent));
+      flex-shrink: 0;
+    }
+    .cell-more {
+      font-size: 0.7em;
+      opacity: 0.6;
+      padding: 0 2px;
+    }
+    .week-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .week-day {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 12px;
+      padding: 10px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .week-day.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+    }
+    .week-day-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 0.85em;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .week-day-count {
+      opacity: 0.6;
+      font-weight: 500;
+    }
+    .week-day-events {
+      display: grid;
+      gap: 6px;
+    }
+    .empty-day {
+      opacity: 0.55;
+      font-size: 0.85em;
+      padding: 6px 2px;
     }
     .event {
       width: 100%;
