@@ -2,6 +2,6 @@
   "name": "Family Hub Calendar Card",
   "render_readme": true,
   "content_in_root": true,
-  "homeassistant": ">=2024.6.0",
+  "homeassistant": "2024.6.0",
   "filename": "family-hub-calendar-card.js"
 }
