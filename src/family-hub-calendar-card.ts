@@ -32,6 +32,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   private lastDetectedLocale?: string;
   private fetchedTodoEntities = "";
   private fetchedForecastEntity = "";
+  private forecastUnsubscribe?: () => Promise<void>;
   private modalReturnFocusElement?: HTMLElement;
 
   public setConfig(config: FamilyHubCalendarConfig): void {
@@ -40,6 +41,11 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     this.orientation = this.config.layout_orientation === "horizontal" ? "horizontal" : "vertical";
     this.lastDetectedLocale = this.hass?.locale?.language;
     this.activeLanguage = detectLanguage(this.hass, this.config.language);
+  }
+
+  public disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubscribeWeatherForecast();
   }
 
   public getCardSize(): number {
@@ -111,29 +117,50 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   private refreshWeatherForecast(): void {
     const entity = this.config?.weather_entity;
     if (!entity) {
+      this.unsubscribeWeatherForecast();
       this.fetchedForecastEntity = "";
       this.dailyForecast = [];
       return;
     }
     if (entity === this.fetchedForecastEntity) return;
+    this.unsubscribeWeatherForecast();
     this.fetchedForecastEntity = entity;
-    void this.fetchWeatherForecast(entity);
+    this.dailyForecast = [];
+    void this.subscribeWeatherForecast(entity);
   }
 
-  private async fetchWeatherForecast(entity: string): Promise<void> {
-    // Modern Home Assistant no longer populates weather.attributes.forecast by default; the
-    // daily forecast must be requested on demand via this websocket command instead.
-    if (!this.hass?.callWS) return;
+  private unsubscribeWeatherForecast(): void {
+    const unsubscribe = this.forecastUnsubscribe;
+    this.forecastUnsubscribe = undefined;
+    if (unsubscribe) void unsubscribe();
+  }
+
+  private async subscribeWeatherForecast(entity: string): Promise<void> {
+    // Modern Home Assistant no longer populates weather.attributes.forecast by default, and
+    // there is no request/response "get_forecasts" websocket command; the daily forecast must
+    // be requested via the subscription-based `weather/subscribe_forecast` command instead,
+    // which immediately pushes the current forecast and then again on every update.
+    if (!this.hass?.connection?.subscribeMessage) return;
     try {
-      const response = await this.hass.callWS<Record<string, { forecast?: Record<string, unknown>[] }>>({
-        type: "weather/get_forecasts",
-        entity_id: [entity],
-        forecast_type: "daily"
-      });
-      if (entity !== this.config?.weather_entity) return;
-      this.dailyForecast = response?.[entity]?.forecast ?? [];
+      const unsubscribe = await this.hass.connection.subscribeMessage<{ forecast?: Record<string, unknown>[] }>(
+        (message) => {
+          if (entity !== this.config?.weather_entity) return;
+          this.dailyForecast = message?.forecast ?? [];
+        },
+        {
+          type: "weather/subscribe_forecast",
+          entity_id: entity,
+          forecast_type: "daily"
+        }
+      );
+      if (entity !== this.config?.weather_entity) {
+        void unsubscribe();
+        return;
+      }
+      this.forecastUnsubscribe = unsubscribe;
     } catch {
-      // Ignore errors fetching the forecast; day-cell weather badges simply won't render.
+      // Ignore errors subscribing to the forecast (e.g. entity doesn't support daily
+      // forecasts); day-cell weather badges simply won't render.
     }
   }
 
@@ -303,7 +330,13 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   }
 
   private renderWeather() {
-    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return nothing;
+    if (
+      !this.hass ||
+      !this.config?.weather_entity ||
+      this.config.show_weather === false ||
+      (this.config.weather_placement ?? "header") !== "sidebar"
+    )
+      return nothing;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return nothing;
     const legacyForecast = Array.isArray(weather.attributes.forecast)
@@ -338,7 +371,13 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   }
 
   private renderWeatherBadge() {
-    if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return nothing;
+    if (
+      !this.hass ||
+      !this.config?.weather_entity ||
+      this.config.show_weather === false ||
+      (this.config.weather_placement ?? "header") !== "header"
+    )
+      return nothing;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return nothing;
     const unit = String(weather.attributes.temperature_unit ?? "°");
@@ -425,9 +464,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     const legacyForecast = Array.isArray(weather?.attributes.forecast)
       ? (weather!.attributes.forecast as Record<string, unknown>[])
       : [];
-    // Prefer the on-demand daily forecast fetched via `weather/get_forecasts` (modern Home
-    // Assistant no longer populates the `forecast` attribute by default), falling back to the
-    // legacy attribute for older HA versions/integrations that still expose it.
+    // Prefer the on-demand daily forecast pushed via the `weather/subscribe_forecast`
+    // websocket subscription (modern Home Assistant no longer populates the `forecast`
+    // attribute by default), falling back to the legacy attribute for older HA
+    // versions/integrations that still expose it.
     const forecast = this.dailyForecast.length ? this.dailyForecast : legacyForecast;
     const dayKey = day.toDateString();
     return forecast.find((entry) => {
@@ -438,10 +478,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     });
   }
 
-  private renderDayWeather(day: Date) {
+  private renderDayWeather(day: Date, placements: Array<FamilyHubCalendarConfig["weather_placement"]> = ["day_cell"]) {
     if (
       !this.config ||
-      this.config.weather_placement !== "day_cell" ||
+      !placements.includes(this.config.weather_placement ?? "header") ||
       this.config.show_weather === false ||
       !this.config.weather_entity
     )
@@ -730,13 +770,13 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     }
 
     const events = this.visibleEvents();
-    if (!events.length)
-      return html`<div class="empty">
-        <span class="empty-icon">🗓️</span>
-        <span>${this.t("no_events")}</span>
-      </div>`;
 
     if (this.config?.grouped_by_calendar) {
+      if (!events.length)
+        return html`<div class="empty">
+          <span class="empty-icon">🗓️</span>
+          <span>${this.t("no_events")}</span>
+        </div>`;
       const groups = this.groupedEvents(events);
       return html`<div class="event-list">
         ${[...groups.entries()].map(
@@ -748,7 +788,34 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       </div>`;
     }
 
-    return html`<div class="event-list">${events.map((event) => this.renderEventItem(event))}</div>`;
+    return this.renderAgendaList(events);
+  }
+
+  private renderAgendaList(events: HubEvent[]) {
+    if (!this.config) return nothing;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const days = gridDaysForView(this.currentDate, this.currentView as CalendarView, weekStartDay);
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const todayKey = new Date().toDateString();
+    const showAgendaWeather = (this.config.weather_placement ?? "header") === "agenda";
+
+    return html`<div class="agenda-list">
+      ${days.map((day) => {
+        const dayEvents = eventsOnDay(events, day);
+        const isToday = day.toDateString() === todayKey;
+        return html`<section class="agenda-day ${isToday ? "today" : ""}">
+          <header class="agenda-day-header">
+            <span class="agenda-day-name">
+              ${new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }).format(day)}
+            </span>
+            ${showAgendaWeather ? this.renderDayWeather(day, ["agenda"]) : nothing}
+          </header>
+          ${dayEvents.length
+            ? html`<div class="event-list">${dayEvents.map((event) => this.renderEventItem(event))}</div>`
+            : html`<div class="empty-day">${this.t("no_events")}</div>`}
+        </section>`;
+      })}
+    </div>`;
   }
 
   private renderModal() {
@@ -821,7 +888,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
         ><div class="empty"><span class="empty-icon">⚠️</span><span>Configuration required</span></div></ha-card
       >`;
 
-    const title = this.config.title || "Family Hub Calendar";
+    const title = this.config.title ?? "Family Hub Calendar";
     const views = this.config.enabled_views || [];
     const theme = this.config.theme_colors ?? {};
     const density = this.config.event_density || "comfortable";
@@ -838,39 +905,42 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
           ${this.config.show_header !== false
             ? html`<header>
                 <div class="left">
-                  ${this.renderWeatherBadge()}
-                  <h1>${title}</h1>
-                  <span class="date-line">${this.periodLabel()}</span>
-                  ${this.activeSection === "calendar" ? this.renderCalendarLegend() : nothing}
+                  ${this.renderWeatherBadge()} ${title ? html`<h1>${title}</h1>` : nothing}
+                </div>
+                <div class="center">
+                  <span class="period-title">${this.periodLabel()}</span>
+                  ${this.activeSection !== "tasks"
+                    ? html`<div class="nav-group">
+                        <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>
+                          ‹
+                        </button>
+                        <button class="today-btn" @click=${() => (this.currentDate = new Date())}>
+                          ${this.t("today")}
+                        </button>
+                        <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>
+                          ›
+                        </button>
+                      </div>`
+                    : nothing}
                 </div>
                 <div class="right">
                   ${this.activeSection !== "tasks"
-                    ? html`<div class="nav-group">
-                          <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>
-                            ‹
-                          </button>
-                          <button class="today-btn" @click=${() => (this.currentDate = new Date())}>
-                            ${this.t("today")}
-                          </button>
-                          <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>
-                            ›
-                          </button>
-                        </div>
-                        <label class="date-jump">
-                          <input
-                            type="date"
-                            title=${this.t("jump_to_date")}
-                            @change=${(e: Event) => {
-                              const input = e.target as HTMLInputElement;
-                              const value = input.value ? new Date(input.value) : new Date();
-                              if (!Number.isNaN(value.getTime())) this.currentDate = value;
-                            }}
-                          />
-                        </label>`
+                    ? html`<label class="date-jump">
+                        <input
+                          type="date"
+                          title=${this.t("jump_to_date")}
+                          @change=${(e: Event) => {
+                            const input = e.target as HTMLInputElement;
+                            const value = input.value ? new Date(input.value) : new Date();
+                            if (!Number.isNaN(value.getTime())) this.currentDate = value;
+                          }}
+                        />
+                      </label>`
                     : nothing}
                 </div>
               </header>`
             : nothing}
+          ${this.activeSection === "calendar" ? html`<div class="legend-row">${this.renderCalendarLegend()}</div>` : nothing}
 
           ${this.activeSection === "calendar"
             ? html`<nav class="views">
@@ -1015,19 +1085,28 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       letter-spacing: 0.01em;
     }
     header {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       gap: 12px;
-      align-items: flex-start;
-      justify-content: space-between;
-      flex-wrap: wrap;
+      align-items: center;
       margin-bottom: 12px;
       padding-bottom: 14px;
       border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.14));
     }
     .left {
-      display: grid;
-      gap: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
       min-width: 0;
+      flex-wrap: wrap;
+    }
+    .center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      text-align: center;
     }
     .weather-badge {
       display: inline-flex;
@@ -1043,25 +1122,30 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     }
     .left h1 {
       margin: 0;
-      font-size: 1.6rem;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+    .period-title {
+      display: block;
+      font-size: 1.9rem;
       font-weight: 800;
       letter-spacing: -0.02em;
-    }
-    .date-line {
-      display: inline-flex;
-      align-self: start;
-      opacity: 0.85;
-      font-size: 0.85em;
-      font-weight: 600;
       text-transform: capitalize;
-      background: var(--fhc-accent-soft);
-      color: var(--fhc-accent, var(--primary-color));
-      padding: 4px 10px;
-      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .legend-row {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 10px;
     }
     .legend {
       display: flex;
       flex-wrap: wrap;
+      justify-content: center;
       gap: 8px;
       margin-top: 4px;
     }
@@ -1110,8 +1194,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     .right {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
+      min-width: 0;
     }
     .nav-group {
       display: flex;
@@ -1448,6 +1534,33 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       opacity: 0.55;
       font-size: 0.85em;
       padding: 6px 2px;
+    }
+    .agenda-list {
+      display: grid;
+      gap: 14px;
+    }
+    .agenda-day {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .agenda-day.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1.5px var(--fhc-accent, var(--primary-color));
+      background: var(--fhc-accent-soft);
+    }
+    .agenda-day-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .agenda-day-name {
+      font-size: 0.95em;
+      font-weight: 800;
+      text-transform: capitalize;
     }
     .time-grid {
       display: flex;

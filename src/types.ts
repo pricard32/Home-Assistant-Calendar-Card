@@ -77,6 +77,9 @@ export interface HomeAssistant {
   };
   callService(domain: string, service: string, data?: Record<string, unknown>): Promise<unknown>;
   callWS?<T>(message: Record<string, unknown>): Promise<T>;
+  connection?: {
+    subscribeMessage<T>(callback: (message: T) => void, message: Record<string, unknown>): Promise<() => Promise<void>>;
+  };
 }
 
 export interface LovelaceCard {
