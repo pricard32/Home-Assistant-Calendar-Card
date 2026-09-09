@@ -17,24 +17,26 @@ FamilyHubCalendarCard (LitElement)
   ├─ Localization layer (en/fr + auto-detect)
   ├─ Data model layer (merge/sort events+tasks+meals)
   ├─ View state layer (day/3-day/week/work week/month/agenda/timeline)
-  ├─ Interaction layer (section nav, swipe, prev/next, today, date jump, live calendar toggles, orientation toggle, modal)
+  ├─ Interaction layer (section nav, swipe, prev/next, today, date jump, clickable legend calendar toggles, modal)
   └─ Rendering layer (header, sidebar, weather, grouped/merged timeline)
 ```
 
 ## 2) Component Breakdown
 
 - `family-hub-calendar` (main card)
-  - left-hand side panel to switch between Calendar / Tasks / Meal Planner sections, plus a live per-calendar visibility toggle list
-  - navigation + animated view switching, with a vertical/horizontal layout toggle for day/3-day/week/work-week/agenda views
+  - left-hand side panel to switch between Calendar / Tasks / Meal Planner sections
+  - per-calendar visibility toggling from the header legend — click a calendar's name/color chip to hide or show it (dimmed + strikethrough when hidden), instead of a separate side-panel list that could overlap the calendar grid
+  - navigation + animated view switching; the day/3-day/week/work-week/agenda vertical/horizontal layout is set from the visual editor's "layout orientation" field only, so the live card UI stays uncluttered
   - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow) with the month/year name shown in the header
   - week/work-week grid showing every day (with a "no events" placeholder) or a compact agenda list
   - merged or grouped calendars
-  - large, touch-friendly event bubbles sized for wall-mounted touch panels
+  - large, touch-friendly event bubbles sized for wall-mounted touch panels, with four event-density presets (`compact`, `comfortable`, `large`, `extra_large`) — the two larger presets are tuned for big/wall-mounted displays
+  - optional per-day weather badge (icon + high/low) rendered directly in month/week day cells when `weather_placement: day_cell` is configured
   - event modal (details, copy, delete, map launch; "Edit" opens the calendar entity's native more-info dialog since Home Assistant has no generic edit-event service)
   - tasks, meals, weather sections
 - `family-hub-calendar-editor` (visual editor)
   - Fully configurable through the Lovelace UI — no YAML required
-  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, layout orientation, section toggles (including "show empty days"), weather entity/placement, and task/meal entities
+  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density (4 levels), layout orientation, section toggles (including "show empty days"), weather entity/placement, and task/meal entities
   - Calendar picker (`ha-entity-picker`, filtered to `calendar.*`) with per-calendar name, color picker (native swatch + quick palette), and enabled toggle
   - Family member list editor (name, avatar, color picker) for assignment color-coding
   - Theme preset selector (Home Assistant auto, Midnight, Light, Sunset, Forest, Ocean, or Custom) plus individual color fields/pickers (background/surface/text/accent), accepting hex values or CSS variables
@@ -71,7 +73,7 @@ enabled_views: [day, 3day, week, work_week, month, agenda, timeline]
 grouped_by_calendar: false
 
 weather_entity: weather.home
-weather_placement: header
+weather_placement: header # header | day_cell (day_cell shows a small icon + high/low badge in each month/week day cell)
 
 show_tasks: true
 task_entities:
@@ -89,7 +91,7 @@ font_family: "Inter"
 show_header: true
 show_sidebar: true
 show_weather: true
-event_density: comfortable
+event_density: comfortable # compact | comfortable | large | extra_large (large/extra_large are for big wall-mounted displays)
 compact_mode: false
 border_radius: 16
 show_empty_days: true # render full week/month grids even for days without events

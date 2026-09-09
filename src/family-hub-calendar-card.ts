@@ -305,14 +305,19 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   private renderCalendarLegend() {
     if (!this.config) return nothing;
     const calendars = this.config.calendars.filter((calendar) => calendar.enabled !== false);
-    if (calendars.length < 2) return nothing;
+    if (!calendars.length) return nothing;
     return html`<div class="legend">
-      ${calendars.map(
-        (calendar) => html`<span class="legend-item">
+      ${calendars.map((calendar) => {
+        const visible = !this.hiddenCalendarEntities.has(calendar.entity);
+        return html`<button
+          class="legend-item ${visible ? "" : "hidden"}"
+          title=${visible ? this.t("hide_calendar") : this.t("show_calendar")}
+          @click=${() => this.toggleCalendarVisibility(calendar.entity)}
+        >
           <span class="legend-dot" style=${`background:${calendar.color || "var(--fhc-accent)"}`}></span>
           ${calendar.name || calendar.entity}
-        </span>`
-      )}
+        </button>`;
+      })}
     </div>`;
   }
 
@@ -335,34 +340,47 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
           <span class="side-nav-label">${item.label}</span>
         </button>`
       )}
-      ${this.activeSection === "calendar" ? this.renderCalendarToggleList() : nothing}
     </nav>`;
-  }
-
-  private renderCalendarToggleList() {
-    if (!this.config) return nothing;
-    const calendars = this.config.calendars.filter((calendar) => calendar.enabled !== false);
-    if (!calendars.length) return nothing;
-    return html`<div class="calendar-toggles">
-      <span class="calendar-toggles-title">${this.t("calendars")}</span>
-      ${calendars.map((calendar) => {
-        const visible = !this.hiddenCalendarEntities.has(calendar.entity);
-        return html`<label class="calendar-toggle">
-          <input
-            type="checkbox"
-            .checked=${visible}
-            @change=${() => this.toggleCalendarVisibility(calendar.entity)}
-          />
-          <span class="calendar-toggle-dot" style=${`background:${calendar.color || "var(--fhc-accent)"}`}></span>
-          <span class="calendar-toggle-name">${calendar.name || calendar.entity}</span>
-        </label>`;
-      })}
-    </div>`;
   }
 
   private jumpToDay(day: Date): void {
     this.currentDate = new Date(day);
     if (this.config?.enabled_views?.includes("day")) this.currentView = "day";
+  }
+
+  private forecastForDay(day: Date): Record<string, unknown> | undefined {
+    if (!this.hass || !this.config?.weather_entity) return undefined;
+    const weather = this.hass.states[this.config.weather_entity];
+    const forecast = Array.isArray(weather?.attributes.forecast)
+      ? (weather!.attributes.forecast as Record<string, unknown>[])
+      : [];
+    const dayKey = day.toDateString();
+    return forecast.find((entry) => {
+      const value = entry.datetime;
+      if (typeof value !== "string") return false;
+      const parsed = new Date(value);
+      return !Number.isNaN(parsed.getTime()) && parsed.toDateString() === dayKey;
+    });
+  }
+
+  private renderDayWeather(day: Date) {
+    if (
+      !this.config ||
+      this.config.weather_placement !== "day_cell" ||
+      this.config.show_weather === false ||
+      !this.config.weather_entity
+    )
+      return nothing;
+    const entry = this.forecastForDay(day);
+    if (!entry) return nothing;
+    const high = entry.temperature;
+    const low = entry.templow;
+    return html`<span class="cell-weather" title=${String(entry.condition ?? "")}>
+      ${this.weatherIcon(String(entry.condition ?? ""))}
+      ${high !== undefined ? html`<span class="cell-weather-hi">${String(Math.round(Number(high)))}°</span>` : nothing}${low !== undefined
+        ? html`<span class="cell-weather-lo">/${String(Math.round(Number(low)))}°</span>`
+        : nothing}
+    </span>`;
   }
 
   private renderMonthGrid() {
@@ -389,7 +407,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
             const visible = dayEvents.slice(0, 3);
             const extra = dayEvents.length - visible.length;
             return html`<div class="month-cell ${isOutside ? "outside" : ""} ${isToday ? "today" : ""}">
-              <button class="month-cell-date" @click=${() => this.jumpToDay(day)}>${day.getDate()}</button>
+              <div class="month-cell-top">
+                <button class="month-cell-date" @click=${() => this.jumpToDay(day)}>${day.getDate()}</button>
+                ${this.renderDayWeather(day)}
+              </div>
               <div class="month-cell-events">
                 ${visible.map(
                   (event) => html`<button
@@ -430,6 +451,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
             <span class="week-day-name">
               ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
             </span>
+            ${this.renderDayWeather(day)}
             <span class="week-day-count">${dayEvents.length}</span>
           </header>
           <div class="week-day-events">
@@ -603,10 +625,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     const title = this.config.title || "Family Hub Calendar";
     const views = this.config.enabled_views || [];
     const theme = this.config.theme_colors ?? {};
-    const orientableViews = ["day", "3day", "week", "work_week", "agenda"];
+    const density = this.config.event_density || "comfortable";
 
     return html`<ha-card
-      class="hub"
+      class="hub density-${density}"
       @touchstart=${this.onTouchStart}
       @touchend=${this.onTouchEnd}
       style=${`--fhc-font-family:${this.config.font_family || "inherit"};--fhc-radius:${this.config.border_radius}px;--fhc-bg:${theme.background || "inherit"};--fhc-surface:${theme.surface || "inherit"};--fhc-text:${theme.text || "inherit"};--fhc-accent:${theme.accent || "var(--primary-color)"};`}
@@ -663,26 +685,6 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
                       </button>`
                   )}
                 </div>
-                ${orientableViews.includes(this.currentView)
-                  ? html`<div class="orientation-toggle">
-                      <button
-                        class=${this.orientation === "vertical" ? "active" : ""}
-                        title=${this.t("vertical")}
-                        aria-label=${this.t("vertical")}
-                        @click=${() => (this.orientation = "vertical")}
-                      >
-                        ↕
-                      </button>
-                      <button
-                        class=${this.orientation === "horizontal" ? "active" : ""}
-                        title=${this.t("horizontal")}
-                        aria-label=${this.t("horizontal")}
-                        @click=${() => (this.orientation = "horizontal")}
-                      >
-                        ↔
-                      </button>
-                    </div>`
-                  : nothing}
               </nav>`
             : nothing}
 
@@ -713,14 +715,47 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       background: var(--fhc-bg, var(--ha-card-background, var(--card-background-color)));
       color: var(--fhc-text, var(--primary-text-color));
       border-radius: var(--fhc-radius, 16px);
-      padding: 18px;
+      padding: 20px 22px;
       font-family: var(--fhc-font-family, inherit);
       overflow: hidden;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.1);
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.12));
+    }
+    .hub.density-compact {
+      --fhc-event-min-h: 48px;
+      --fhc-event-pad: 10px 12px;
+      --fhc-event-font: 0.92em;
+      --fhc-month-cell-h: 92px;
+      --fhc-chip-min-h: 20px;
+      --fhc-chip-pad: 3px 6px;
+    }
+    .hub.density-comfortable {
+      --fhc-event-min-h: 56px;
+      --fhc-event-pad: 14px 16px;
+      --fhc-event-font: 1em;
+      --fhc-month-cell-h: 108px;
+      --fhc-chip-min-h: 24px;
+      --fhc-chip-pad: 4px 7px;
+    }
+    .hub.density-large {
+      --fhc-event-min-h: 76px;
+      --fhc-event-pad: 18px 20px;
+      --fhc-event-font: 1.2em;
+      --fhc-month-cell-h: 136px;
+      --fhc-chip-min-h: 32px;
+      --fhc-chip-pad: 6px 10px;
+    }
+    .hub.density-extra_large {
+      --fhc-event-min-h: 96px;
+      --fhc-event-pad: 22px 26px;
+      --fhc-event-font: 1.45em;
+      --fhc-month-cell-h: 168px;
+      --fhc-chip-min-h: 40px;
+      --fhc-chip-pad: 8px 14px;
     }
     .layout {
       display: flex;
-      gap: 16px;
+      gap: 18px;
       align-items: flex-start;
     }
     .main-column {
@@ -730,81 +765,45 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     .side-nav {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      width: 88px;
+      gap: 8px;
+      width: 84px;
       flex-shrink: 0;
     }
     .side-nav-btn {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 2px;
+      gap: 4px;
       border: none;
       background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
       color: inherit;
-      border-radius: 12px;
-      padding: 10px 6px;
-      min-height: 52px;
+      border-radius: 14px;
+      padding: 12px 6px;
+      min-height: 60px;
       cursor: pointer;
-      opacity: 0.75;
+      opacity: 0.72;
+      transition: background 150ms ease, opacity 150ms ease, box-shadow 150ms ease, transform 150ms ease;
     }
     .side-nav-btn:hover {
       opacity: 1;
       background: var(--fhc-accent-soft);
+      transform: translateY(-1px);
     }
     .side-nav-btn.active {
       background: var(--fhc-accent, var(--primary-color));
       color: #fff;
       opacity: 1;
+      box-shadow: 0 6px 16px color-mix(in srgb, var(--fhc-accent, var(--primary-color)) 45%, transparent);
     }
     .side-nav-icon {
-      font-size: 1.3rem;
+      font-size: 1.4rem;
       line-height: 1;
     }
     .side-nav-label {
-      font-size: 0.7em;
-      font-weight: 600;
-      text-align: center;
-    }
-    .calendar-toggles {
-      display: grid;
-      gap: 6px;
-      margin-top: 8px;
-      padding: 10px 8px;
-      border-radius: 12px;
-      background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
-    }
-    .calendar-toggles-title {
-      font-size: 0.7em;
+      font-size: 0.68em;
       font-weight: 700;
-      text-transform: uppercase;
-      opacity: 0.6;
-      letter-spacing: 0.04em;
-    }
-    .calendar-toggle {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.78em;
-      cursor: pointer;
-      min-height: 28px;
-    }
-    .calendar-toggle input {
-      width: 16px;
-      height: 16px;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    .calendar-toggle-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .calendar-toggle-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      text-align: center;
+      letter-spacing: 0.01em;
     }
     header {
       display: flex;
@@ -812,42 +811,67 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       align-items: flex-start;
       justify-content: space-between;
       flex-wrap: wrap;
-      margin-bottom: 4px;
+      margin-bottom: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.14));
     }
     .left {
       display: grid;
-      gap: 4px;
+      gap: 6px;
       min-width: 0;
     }
     .left h1 {
       margin: 0;
-      font-size: 1.4rem;
-      font-weight: 700;
-      letter-spacing: -0.01em;
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
     }
     .date-line {
-      opacity: 0.7;
-      font-size: 0.95em;
+      display: inline-flex;
+      align-self: start;
+      opacity: 0.85;
+      font-size: 0.85em;
+      font-weight: 600;
       text-transform: capitalize;
+      background: var(--fhc-accent-soft);
+      color: var(--fhc-accent, var(--primary-color));
+      padding: 4px 10px;
+      border-radius: 999px;
     }
     .legend {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 4px;
+      gap: 8px;
+      margin-top: 2px;
     }
     .legend-item {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       font-size: 0.78em;
-      opacity: 0.85;
+      font-weight: 500;
+      opacity: 0.9;
+      border: none;
+      cursor: pointer;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 5%, transparent));
+      color: inherit;
+      padding: 5px 10px;
+      border-radius: 999px;
+      transition: opacity 120ms ease, background 120ms ease;
+    }
+    .legend-item:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .legend-item.hidden {
+      opacity: 0.4;
+      text-decoration: line-through;
     }
     .legend-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       display: inline-block;
+      flex-shrink: 0;
     }
     .right {
       display: flex;
@@ -875,6 +899,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       font-size: 1.4rem;
       line-height: 1;
       cursor: pointer;
+      transition: background 120ms ease;
     }
     .icon-nav:hover {
       background: var(--fhc-accent-soft);
@@ -883,30 +908,33 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       border: none;
       background: transparent;
       color: inherit;
-      font-weight: 600;
+      font-weight: 700;
       font-size: 0.9em;
       padding: 10px 16px;
       min-height: 44px;
       border-radius: 999px;
       cursor: pointer;
+      transition: background 120ms ease;
     }
     .today-btn:hover {
       background: var(--fhc-accent-soft);
     }
     .date-jump input[type="date"] {
       border: 1px solid var(--divider-color, #374151);
-      border-radius: 8px;
-      padding: 5px 8px;
+      border-radius: 10px;
+      padding: 8px 10px;
       background: transparent;
       color: inherit;
       font-size: 0.85em;
+      min-height: 44px;
+      box-sizing: border-box;
     }
     .views {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      margin: 12px 0 14px;
+      margin: 0 0 16px;
       flex-wrap: wrap;
     }
     .segmented {
@@ -925,9 +953,9 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       min-height: 40px;
       border-radius: 9px;
       font-size: 0.9em;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
-      opacity: 0.75;
+      opacity: 0.7;
       transition: background 120ms ease, opacity 120ms ease;
     }
     .segmented button:hover {
@@ -937,32 +965,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       background: var(--fhc-accent, var(--primary-color));
       color: #fff;
       opacity: 1;
-    }
-    .orientation-toggle {
-      display: flex;
-      gap: 2px;
-      background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
-      border-radius: 12px;
-      padding: 3px;
-    }
-    .orientation-toggle button {
-      border: none;
-      background: transparent;
-      color: inherit;
-      width: 34px;
-      height: 34px;
-      border-radius: 9px;
-      font-size: 1rem;
-      cursor: pointer;
-      opacity: 0.75;
-    }
-    .orientation-toggle button:hover {
-      opacity: 1;
-    }
-    .orientation-toggle button.active {
-      background: var(--fhc-accent, var(--primary-color));
-      color: #fff;
-      opacity: 1;
+      box-shadow: 0 4px 10px color-mix(in srgb, var(--fhc-accent, var(--primary-color)) 40%, transparent);
     }
     .content {
       display: flex;
@@ -1028,58 +1031,81 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     }
     .month-grid {
       display: grid;
-      gap: 4px;
+      gap: 6px;
     }
     .month-grid-header {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 4px;
+      gap: 6px;
       font-size: 0.75em;
-      font-weight: 600;
-      opacity: 0.6;
+      font-weight: 700;
+      opacity: 0.55;
       text-transform: uppercase;
+      letter-spacing: 0.03em;
       text-align: center;
       padding-bottom: 4px;
     }
     .month-grid-row {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 4px;
+      gap: 6px;
     }
     .month-cell {
-      min-height: 108px;
-      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
-      border-radius: 10px;
-      padding: 4px;
+      min-height: var(--fhc-month-cell-h, 108px);
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 12px;
+      padding: 6px;
       display: grid;
       grid-template-rows: auto 1fr;
-      gap: 2px;
+      gap: 3px;
       background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+      transition: box-shadow 120ms ease;
     }
     .month-cell.outside {
-      opacity: 0.4;
+      opacity: 0.38;
     }
     .month-cell.today {
       border-color: var(--fhc-accent, var(--primary-color));
-      box-shadow: inset 0 0 0 1px var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1.5px var(--fhc-accent, var(--primary-color));
+      background: var(--fhc-accent-soft);
+    }
+    .month-cell-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
     }
     .month-cell-date {
-      justify-self: end;
       border: none;
       background: transparent;
       color: inherit;
-      font-weight: 600;
-      font-size: 0.9em;
+      font-weight: 700;
+      font-size: var(--fhc-event-font, 0.9em);
       cursor: pointer;
-      width: 32px;
-      height: 32px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       display: grid;
       place-items: center;
+      flex-shrink: 0;
     }
     .month-cell.today .month-cell-date {
       background: var(--fhc-accent, var(--primary-color));
       color: #fff;
+    }
+    .cell-weather {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 0.72em;
+      opacity: 0.75;
+      white-space: nowrap;
+    }
+    .cell-weather-hi {
+      font-weight: 700;
+    }
+    .cell-weather-lo {
+      opacity: 0.7;
     }
     .month-cell-events {
       display: grid;
@@ -1092,20 +1118,22 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       align-items: center;
       gap: 5px;
       border: none;
-      background: transparent;
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 18%, transparent);
       color: inherit;
       text-align: left;
-      font-size: 0.8em;
-      padding: 4px 5px;
-      min-height: 24px;
-      border-radius: 6px;
+      font-size: var(--fhc-event-font, 0.8em);
+      font-weight: 600;
+      padding: var(--fhc-chip-pad, 4px 7px);
+      min-height: var(--fhc-chip-min-h, 24px);
+      border-radius: 999px;
       cursor: pointer;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      transition: background 120ms ease;
     }
     .cell-event:hover {
-      background: var(--fhc-accent-soft);
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 30%, transparent);
     }
     .cell-dot {
       width: 7px;
@@ -1124,26 +1152,28 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       gap: 10px;
     }
     .week-day {
-      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
-      border-radius: 12px;
-      padding: 10px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 14px;
+      padding: 12px;
       background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
     }
     .week-day.today {
       border-color: var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1.5px var(--fhc-accent, var(--primary-color));
     }
     .week-day-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
+      gap: 8px;
+      margin-bottom: 8px;
       font-size: 0.85em;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: capitalize;
     }
     .week-day-count {
       opacity: 0.6;
-      font-weight: 500;
+      font-weight: 600;
     }
     .week-day-events {
       display: grid;
@@ -1163,19 +1193,20 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       align-items: center;
       text-align: left;
       cursor: pointer;
-      min-height: 56px;
-      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
-      background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
+      min-height: var(--fhc-event-min-h, 56px);
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 8%, var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent)));
       border-radius: 14px;
-      padding: 14px 16px;
+      padding: var(--fhc-event-pad, 14px 16px);
       color: inherit;
       font: inherit;
+      font-size: var(--fhc-event-font, 1em);
       transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
     .event:hover {
       transform: translateY(-1px);
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
-      background: var(--fhc-accent-soft);
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 16%, var(--fhc-surface, transparent));
     }
     .event-bar {
       width: 5px;
@@ -1193,7 +1224,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       min-width: 0;
     }
     .event-title {
-      font-weight: 600;
+      font-weight: 700;
       font-size: 1.02em;
       white-space: nowrap;
       overflow: hidden;
@@ -1221,12 +1252,19 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     }
     .weather-current {
       display: flex;
-      align-items: baseline;
-      gap: 8px;
+      align-items: center;
+      gap: 10px;
       font-size: 1rem;
     }
     .weather-icon {
       font-size: 1.6rem;
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--fhc-accent-soft);
+      flex-shrink: 0;
     }
     .weather-temp {
       font-size: 1.4rem;
@@ -1292,8 +1330,8 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
-      background: var(--event-color, var(--fhc-accent));
+      padding: 18px 20px;
+      background: linear-gradient(135deg, var(--event-color, var(--fhc-accent)), color-mix(in srgb, var(--event-color, var(--fhc-accent)) 60%, #000));
       color: #fff;
     }
     .modal-source {
@@ -1392,9 +1430,6 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
         flex-direction: row;
         width: 100%;
         overflow-x: auto;
-      }
-      .calendar-toggles {
-        display: none;
       }
     }
   `;

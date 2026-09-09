@@ -34,5 +34,7 @@
   "no_meals": "Aucun repas prévu",
   "vertical": "Vertical",
   "horizontal": "Horizontal",
-  "calendars": "Calendriers"
+  "calendars": "Calendriers",
+  "hide_calendar": "Masquer ce calendrier",
+  "show_calendar": "Afficher ce calendrier"
 }

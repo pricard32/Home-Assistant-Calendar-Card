@@ -52,8 +52,10 @@ const FONT_SIZE_OPTIONS: SelectOption[] = [
 ];
 
 const DENSITY_OPTIONS: SelectOption[] = [
+  { value: "compact", label: "Compact" },
   { value: "comfortable", label: "Comfortable" },
-  { value: "compact", label: "Compact" }
+  { value: "large", label: "Large (big display)" },
+  { value: "extra_large", label: "Extra large (big display)" }
 ];
 
 const WEATHER_PLACEMENT_OPTIONS: SelectOption[] = [
