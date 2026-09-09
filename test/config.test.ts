@@ -29,8 +29,8 @@ describe("dateRangeForView", () => {
     const date = new Date("2026-09-09T12:00:00Z");
     const range = dateRangeForView(date, "work_week", 1);
 
-    expect(range.start.toISOString().slice(0, 10)).toBe("2026-09-07");
-    expect(range.end.toISOString().slice(0, 10)).toBe("2026-09-11");
+    expect([range.start.getFullYear(), range.start.getMonth(), range.start.getDate()]).toEqual([2026, 8, 7]);
+    expect([range.end.getFullYear(), range.end.getMonth(), range.end.getDate()]).toEqual([2026, 8, 11]);
   });
 });
 
