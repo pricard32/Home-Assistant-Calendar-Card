@@ -36,5 +36,6 @@
   "horizontal": "Horizontal",
   "calendars": "Calendriers",
   "hide_calendar": "Masquer ce calendrier",
-  "show_calendar": "Afficher ce calendrier"
+  "show_calendar": "Afficher ce calendrier",
+  "add_event": "Ajouter un événement"
 }
