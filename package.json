@@ -12,7 +12,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "http://localhost:26831/pricard32/Home-Assistant-Calendar-Card"
+    "url": "https://github.com/pricard32/Home-Assistant-Calendar-Card.git"
   },
   "keywords": [
     "home-assistant",
