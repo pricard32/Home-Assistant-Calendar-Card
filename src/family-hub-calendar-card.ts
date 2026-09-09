@@ -20,6 +20,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   private languageOverridden = false;
   private lastDetectedLocale?: string;
   private fetchedTodoEntities = "";
+  private modalReturnFocusElement?: HTMLElement;
 
   public setConfig(config: FamilyHubCalendarConfig): void {
     this.config = normalizeConfig(config);
@@ -54,6 +55,20 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       }
     }
     this.refreshTodoItems();
+
+    if ((changedProps as Map<PropertyKey, unknown>).has("selectedEvent")) {
+      if (this.selectedEvent) {
+        this.modalReturnFocusElement = (document.activeElement as HTMLElement) ?? undefined;
+        this.renderRoot.querySelector<HTMLElement>(".modal")?.focus();
+      } else if (this.modalReturnFocusElement) {
+        this.modalReturnFocusElement.focus();
+        this.modalReturnFocusElement = undefined;
+      }
+    }
+  }
+
+  private closeModal(): void {
+    this.selectedEvent = undefined;
   }
 
   private refreshTodoItems(): void {
@@ -175,7 +190,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       entity_id: event.calendarEntity,
       event_id: event.id
     });
-    this.selectedEvent = undefined;
+    this.closeModal();
   }
 
   private renderWeather() {
@@ -231,9 +246,23 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     if (!this.selectedEvent) return nothing;
     const event = this.selectedEvent;
 
-    return html`<div class="modal-backdrop" @click=${() => (this.selectedEvent = undefined)}>
-      <section class="modal" @click=${(e: Event) => e.stopPropagation()}>
-        <h2>${this.t("details")}</h2>
+    return html`<div
+      class="modal-backdrop"
+      @click=${() => this.closeModal()}
+      @keydown=${(e: KeyboardEvent) => {
+        if (e.key === "Escape") this.closeModal();
+      }}
+    >
+      <section
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fhc-modal-title"
+        tabindex="-1"
+        @click=${(e: Event) => e.stopPropagation()}
+      >
+        <button class="modal-close" aria-label=${this.t("close")} @click=${() => this.closeModal()}>×</button>
+        <h2 id="fhc-modal-title">${this.t("details")}</h2>
         <h3>${event.title}</h3>
         <p>${event.description || ""}</p>
         <p><strong>${this.t("start")}:</strong> ${this.formatDateTime(event.start)}</p>
@@ -419,12 +448,21 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       padding: 12px;
     }
     .modal {
+      position: relative;
       width: min(680px, 100%);
       max-height: 80vh;
       overflow: auto;
       background: var(--card-background-color);
       border-radius: 14px;
       padding: 16px;
+    }
+    .modal-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 1.2rem;
+      line-height: 1;
+      padding: 4px 8px;
     }
     .actions {
       justify-content: flex-start;

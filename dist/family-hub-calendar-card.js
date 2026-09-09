@@ -330,7 +330,7 @@ var init_lit_html = __esm({
     d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
     f2 = "[ 	\n\f\r]";
     v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
-    _ = /--!?>/g;
+    _ = /-->/g;
     m = />/g;
     p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
 \f\r"'\`<>=]|("|')|))|$)`, "g");
@@ -970,6 +970,7 @@ var en_default = {
   next: "Next",
   jump_to_date: "Jump to date",
   details: "Event details",
+  close: "Close",
   start: "Start",
   end: "End",
   duration: "Duration",
@@ -1003,6 +1004,7 @@ var fr_default = {
   next: "Suivant",
   jump_to_date: "Aller \xE0 une date",
   details: "D\xE9tails de l'\xE9v\xE9nement",
+  close: "Fermer",
   start: "D\xE9but",
   end: "Fin",
   duration: "Dur\xE9e",
@@ -1199,6 +1201,18 @@ var FamilyHubCalendarCard = class extends i4 {
       }
     }
     this.refreshTodoItems();
+    if (changedProps.has("selectedEvent")) {
+      if (this.selectedEvent) {
+        this.modalReturnFocusElement = document.activeElement ?? void 0;
+        this.renderRoot.querySelector(".modal")?.focus();
+      } else if (this.modalReturnFocusElement) {
+        this.modalReturnFocusElement.focus();
+        this.modalReturnFocusElement = void 0;
+      }
+    }
+  }
+  closeModal() {
+    this.selectedEvent = void 0;
   }
   refreshTodoItems() {
     if (!this.hass || !this.config || this.config.show_tasks === false) return;
@@ -1298,7 +1312,7 @@ var FamilyHubCalendarCard = class extends i4 {
       entity_id: event.calendarEntity,
       event_id: event.id
     });
-    this.selectedEvent = void 0;
+    this.closeModal();
   }
   renderWeather() {
     if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return A;
@@ -1344,9 +1358,23 @@ var FamilyHubCalendarCard = class extends i4 {
   renderModal() {
     if (!this.selectedEvent) return A;
     const event = this.selectedEvent;
-    return b2`<div class="modal-backdrop" @click=${() => this.selectedEvent = void 0}>
-      <section class="modal" @click=${(e5) => e5.stopPropagation()}>
-        <h2>${this.t("details")}</h2>
+    return b2`<div
+      class="modal-backdrop"
+      @click=${() => this.closeModal()}
+      @keydown=${(e5) => {
+      if (e5.key === "Escape") this.closeModal();
+    }}
+    >
+      <section
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fhc-modal-title"
+        tabindex="-1"
+        @click=${(e5) => e5.stopPropagation()}
+      >
+        <button class="modal-close" aria-label=${this.t("close")} @click=${() => this.closeModal()}>×</button>
+        <h2 id="fhc-modal-title">${this.t("details")}</h2>
         <h3>${event.title}</h3>
         <p>${event.description || ""}</p>
         <p><strong>${this.t("start")}:</strong> ${this.formatDateTime(event.start)}</p>
@@ -1519,12 +1547,21 @@ FamilyHubCalendarCard.styles = i`
       padding: 12px;
     }
     .modal {
+      position: relative;
       width: min(680px, 100%);
       max-height: 80vh;
       overflow: auto;
       background: var(--card-background-color);
       border-radius: 14px;
       padding: 16px;
+    }
+    .modal-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 1.2rem;
+      line-height: 1;
+      padding: 4px 8px;
     }
     .actions {
       justify-content: flex-start;
