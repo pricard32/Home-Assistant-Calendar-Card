@@ -47,6 +47,7 @@ export interface FamilyHubCalendarConfig {
   border_radius?: number;
   show_empty_days?: boolean;
   theme_preset?: string;
+  layout_orientation?: "vertical" | "horizontal";
   theme_colors?: {
     background?: string;
     surface?: string;

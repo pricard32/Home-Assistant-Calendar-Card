@@ -29,5 +29,10 @@
   "meals": "Meals",
   "daily_summary": "Daily Summary",
   "no_events": "No events in range",
-  "more": "more"
+  "more": "more",
+  "no_tasks": "No tasks",
+  "no_meals": "No meals planned",
+  "vertical": "Vertical",
+  "horizontal": "Horizontal",
+  "calendars": "Calendars"
 }

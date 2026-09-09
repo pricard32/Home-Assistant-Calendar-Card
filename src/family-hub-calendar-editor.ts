@@ -63,6 +63,11 @@ const WEATHER_PLACEMENT_OPTIONS: SelectOption[] = [
   { value: "agenda", label: "Agenda" }
 ];
 
+const ORIENTATION_OPTIONS: SelectOption[] = [
+  { value: "vertical", label: "Vertical" },
+  { value: "horizontal", label: "Horizontal" }
+];
+
 const PALETTE = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "#26A69A", "#EF4444", "#FBBF24"];
 
 const LABELS: Record<string, string> = {
@@ -87,7 +92,8 @@ const LABELS: Record<string, string> = {
   show_meals: "Show meals",
   compact_mode: "Compact mode",
   grouped_by_calendar: "Group events by calendar",
-  show_empty_days: "Show full week/month grid (even empty days)"
+  show_empty_days: "Show full week/month grid (even empty days)",
+  layout_orientation: "Default layout orientation"
 };
 
 const MAIN_SCHEMA = [
@@ -108,7 +114,8 @@ const MAIN_SCHEMA = [
       { name: "week_start_day", selector: { select: { mode: "dropdown", options: WEEK_START_OPTIONS } } },
       { name: "time_format", selector: { select: { mode: "dropdown", options: TIME_FORMAT_OPTIONS } } },
       { name: "font_size", selector: { select: { mode: "dropdown", options: FONT_SIZE_OPTIONS } } },
-      { name: "event_density", selector: { select: { mode: "dropdown", options: DENSITY_OPTIONS } } }
+      { name: "event_density", selector: { select: { mode: "dropdown", options: DENSITY_OPTIONS } } },
+      { name: "layout_orientation", selector: { select: { mode: "dropdown", options: ORIENTATION_OPTIONS } } }
     ]
   },
   { name: "font_family", selector: { text: {} } },

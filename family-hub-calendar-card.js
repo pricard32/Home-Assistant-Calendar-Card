@@ -767,6 +767,7 @@ var init_config = __esm({
       border_radius: 16,
       show_empty_days: true,
       theme_preset: "auto",
+      layout_orientation: "vertical",
       theme_colors: {
         background: "var(--ha-card-background, #111827)",
         surface: "var(--card-background-color, #1f2937)",
@@ -901,7 +902,7 @@ var family_hub_calendar_editor_exports = {};
 __export(family_hub_calendar_editor_exports, {
   FamilyHubCalendarEditor: () => FamilyHubCalendarEditor
 });
-var VIEW_OPTIONS, LANGUAGE_OPTIONS, WEEK_START_OPTIONS, TIME_FORMAT_OPTIONS, FONT_SIZE_OPTIONS, DENSITY_OPTIONS, WEATHER_PLACEMENT_OPTIONS, PALETTE, LABELS, MAIN_SCHEMA, THEME_FIELDS, familyMemberCounter, FamilyHubCalendarEditor;
+var VIEW_OPTIONS, LANGUAGE_OPTIONS, WEEK_START_OPTIONS, TIME_FORMAT_OPTIONS, FONT_SIZE_OPTIONS, DENSITY_OPTIONS, WEATHER_PLACEMENT_OPTIONS, ORIENTATION_OPTIONS, PALETTE, LABELS, MAIN_SCHEMA, THEME_FIELDS, familyMemberCounter, FamilyHubCalendarEditor;
 var init_family_hub_calendar_editor = __esm({
   "src/family-hub-calendar-editor.ts"() {
     "use strict";
@@ -944,6 +945,10 @@ var init_family_hub_calendar_editor = __esm({
       { value: "day_cell", label: "Day cell" },
       { value: "agenda", label: "Agenda" }
     ];
+    ORIENTATION_OPTIONS = [
+      { value: "vertical", label: "Vertical" },
+      { value: "horizontal", label: "Horizontal" }
+    ];
     PALETTE = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "#26A69A", "#EF4444", "#FBBF24"];
     LABELS = {
       title: "Title",
@@ -967,7 +972,8 @@ var init_family_hub_calendar_editor = __esm({
       show_meals: "Show meals",
       compact_mode: "Compact mode",
       grouped_by_calendar: "Group events by calendar",
-      show_empty_days: "Show full week/month grid (even empty days)"
+      show_empty_days: "Show full week/month grid (even empty days)",
+      layout_orientation: "Default layout orientation"
     };
     MAIN_SCHEMA = [
       { name: "title", selector: { text: {} } },
@@ -987,7 +993,8 @@ var init_family_hub_calendar_editor = __esm({
           { name: "week_start_day", selector: { select: { mode: "dropdown", options: WEEK_START_OPTIONS } } },
           { name: "time_format", selector: { select: { mode: "dropdown", options: TIME_FORMAT_OPTIONS } } },
           { name: "font_size", selector: { select: { mode: "dropdown", options: FONT_SIZE_OPTIONS } } },
-          { name: "event_density", selector: { select: { mode: "dropdown", options: DENSITY_OPTIONS } } }
+          { name: "event_density", selector: { select: { mode: "dropdown", options: DENSITY_OPTIONS } } },
+          { name: "layout_orientation", selector: { select: { mode: "dropdown", options: ORIENTATION_OPTIONS } } }
         ]
       },
       { name: "font_family", selector: { text: {} } },
@@ -1495,7 +1502,12 @@ var en_default = {
   meals: "Meals",
   daily_summary: "Daily Summary",
   no_events: "No events in range",
-  more: "more"
+  more: "more",
+  no_tasks: "No tasks",
+  no_meals: "No meals planned",
+  vertical: "Vertical",
+  horizontal: "Horizontal",
+  calendars: "Calendars"
 };
 
 // src/translations/fr.json
@@ -1530,7 +1542,12 @@ var fr_default = {
   meals: "Repas",
   daily_summary: "R\xE9sum\xE9 du jour",
   no_events: "Aucun \xE9v\xE9nement sur cette p\xE9riode",
-  more: "de plus"
+  more: "de plus",
+  no_tasks: "Aucune t\xE2che",
+  no_meals: "Aucun repas pr\xE9vu",
+  vertical: "Vertical",
+  horizontal: "Horizontal",
+  calendars: "Calendriers"
 };
 
 // src/localize.ts
@@ -1685,13 +1702,15 @@ var FamilyHubCalendarCard = class extends i4 {
     this.currentView = "week";
     this.activeLanguage = "en";
     this.todoItemsByEntity = {};
-    this.languageOverridden = false;
+    this.activeSection = "calendar";
+    this.orientation = "vertical";
+    this.hiddenCalendarEntities = /* @__PURE__ */ new Set();
     this.fetchedTodoEntities = "";
   }
   setConfig(config) {
     this.config = normalizeConfig(config);
     this.currentView = this.config.default_view || "week";
-    this.languageOverridden = false;
+    this.orientation = this.config.layout_orientation === "horizontal" ? "horizontal" : "vertical";
     this.lastDetectedLocale = this.hass?.locale?.language;
     this.activeLanguage = detectLanguage(this.hass, this.config.language);
   }
@@ -1709,7 +1728,7 @@ var FamilyHubCalendarCard = class extends i4 {
     };
   }
   updated(changedProps) {
-    if (this.config && !this.languageOverridden && changedProps.has("hass")) {
+    if (this.config && changedProps.has("hass")) {
       const hassLocale = this.hass?.locale?.language;
       if (hassLocale !== this.lastDetectedLocale) {
         this.lastDetectedLocale = hassLocale;
@@ -1756,15 +1775,39 @@ var FamilyHubCalendarCard = class extends i4 {
   }
   allEvents() {
     if (!this.hass || !this.config) return [];
-    const calendarEvents = extractCalendarEvents(this.hass, this.config.calendars);
+    const calendarEvents = extractCalendarEvents(this.hass, this.config.calendars).filter(
+      (event) => !this.hiddenCalendarEntities.has(event.calendarEntity)
+    );
     const taskEvents = this.config.show_tasks === false ? [] : extractTasks(this.hass, this.config.task_entities, this.todoItemsByEntity);
     const mealEvents = this.config.show_meals === false ? [] : extractMeals(this.hass, this.config.meal_entities);
     return sortEvents([...calendarEvents, ...taskEvents, ...mealEvents]);
+  }
+  toggleCalendarVisibility(entity) {
+    const next = new Set(this.hiddenCalendarEntities);
+    if (next.has(entity)) next.delete(entity);
+    else next.add(entity);
+    this.hiddenCalendarEntities = next;
   }
   visibleEvents() {
     if (!this.config) return [];
     const { start, end } = dateRangeForView(this.currentDate, this.currentView, this.config.week_start_day || 1);
     return this.allEvents().filter((event) => event.end >= start && event.start <= end);
+  }
+  periodLabel() {
+    if (!this.config) return "";
+    if (this.activeSection === "tasks") return this.t("tasks");
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    if (this.activeSection === "meals" || this.currentView === "week" || this.currentView === "work_week") {
+      const weekStartDay = this.config.week_start_day ?? 1;
+      const view = this.activeSection === "meals" ? "week" : this.currentView;
+      const { start, end } = dateRangeForView(this.currentDate, view, weekStartDay);
+      const fmt = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+      return `${fmt.format(start)} \u2013 ${fmt.format(end)}`;
+    }
+    if (this.currentView === "month") {
+      return new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(this.currentDate);
+    }
+    return this.formatDateTime(this.currentDate);
   }
   formatDateTime(value) {
     const language = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
@@ -1780,6 +1823,11 @@ var FamilyHubCalendarCard = class extends i4 {
   }
   movePeriod(direction) {
     const next = new Date(this.currentDate);
+    if (this.activeSection === "meals") {
+      next.setDate(next.getDate() + direction * 7);
+      this.currentDate = next;
+      return;
+    }
     if (this.currentView === "month") next.setMonth(next.getMonth() + direction);
     else if (this.currentView === "week" || this.currentView === "work_week") next.setDate(next.getDate() + direction * 7);
     else if (this.currentView === "3day") next.setDate(next.getDate() + direction * 3);
@@ -1815,12 +1863,16 @@ var FamilyHubCalendarCard = class extends i4 {
     ].filter(Boolean).join("\n");
     await navigator.clipboard?.writeText(lines);
   }
-  async editEvent(event) {
-    if (event.sourceType !== "calendar" || !this.hass) return;
-    await this.hass.callService("calendar", "edit_event", {
-      entity_id: event.calendarEntity,
-      event_id: event.id
-    });
+  editEvent(event) {
+    if (event.sourceType !== "calendar" || !event.calendarEntity) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId: event.calendarEntity },
+        bubbles: true,
+        composed: true
+      })
+    );
+    this.closeModal();
   }
   async deleteEvent(event) {
     if (event.sourceType !== "calendar" || !this.hass) return;
@@ -1896,6 +1948,47 @@ var FamilyHubCalendarCard = class extends i4 {
           ${calendar.name || calendar.entity}
         </span>`
     )}
+    </div>`;
+  }
+  renderSideNav() {
+    if (!this.config) return A;
+    const items = [
+      { id: "calendar", icon: "\u{1F5D3}", label: this.t("calendar") }
+    ];
+    if (this.config.show_tasks !== false) items.push({ id: "tasks", icon: "\u2713", label: this.t("tasks") });
+    if (this.config.show_meals !== false) items.push({ id: "meals", icon: "\u{1F37D}", label: this.t("meals") });
+    return b2`<nav class="side-nav">
+      ${items.map(
+      (item) => b2`<button
+          class="side-nav-btn ${this.activeSection === item.id ? "active" : ""}"
+          title=${item.label}
+          @click=${() => this.activeSection = item.id}
+        >
+          <span class="side-nav-icon">${item.icon}</span>
+          <span class="side-nav-label">${item.label}</span>
+        </button>`
+    )}
+      ${this.activeSection === "calendar" ? this.renderCalendarToggleList() : A}
+    </nav>`;
+  }
+  renderCalendarToggleList() {
+    if (!this.config) return A;
+    const calendars = this.config.calendars.filter((calendar) => calendar.enabled !== false);
+    if (!calendars.length) return A;
+    return b2`<div class="calendar-toggles">
+      <span class="calendar-toggles-title">${this.t("calendars")}</span>
+      ${calendars.map((calendar) => {
+      const visible = !this.hiddenCalendarEntities.has(calendar.entity);
+      return b2`<label class="calendar-toggle">
+          <input
+            type="checkbox"
+            .checked=${visible}
+            @change=${() => this.toggleCalendarVisibility(calendar.entity)}
+          />
+          <span class="calendar-toggle-dot" style=${`background:${calendar.color || "var(--fhc-accent)"}`}></span>
+          <span class="calendar-toggle-name">${calendar.name || calendar.entity}</span>
+        </label>`;
+    })}
     </div>`;
   }
   jumpToDay(day) {
@@ -1991,7 +2084,43 @@ var FamilyHubCalendarCard = class extends i4 {
       </span>
     </button>`;
   }
+  renderTasksPanel() {
+    const tasks = this.allEvents().filter((event) => event.sourceType === "task");
+    if (!tasks.length)
+      return b2`<div class="empty">
+        <span class="empty-icon">✅</span>
+        <span>${this.t("no_tasks")}</span>
+      </div>`;
+    return b2`<div class="event-list">${tasks.map((task) => this.renderEventItem(task))}</div>`;
+  }
+  renderMealsPanel() {
+    if (!this.config) return A;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const days = gridDaysForView(this.currentDate, "week", weekStartDay);
+    const meals = this.allEvents().filter((event) => event.sourceType === "meal");
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const todayKey = (/* @__PURE__ */ new Date()).toDateString();
+    return b2`<div class="week-grid">
+      ${days.map((day) => {
+      const dayMeals = eventsOnDay(meals, day);
+      const isToday = day.toDateString() === todayKey;
+      return b2`<section class="week-day ${isToday ? "today" : ""}">
+          <header class="week-day-header">
+            <span class="week-day-name">
+              ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
+            </span>
+            <span class="week-day-count">${dayMeals.length}</span>
+          </header>
+          <div class="week-day-events">
+            ${dayMeals.length ? dayMeals.map((meal) => this.renderEventItem(meal)) : b2`<div class="empty-day">${this.t("no_meals")}</div>`}
+          </div>
+        </section>`;
+    })}
+    </div>`;
+  }
   renderEvents() {
+    if (this.activeSection === "tasks") return this.renderTasksPanel();
+    if (this.activeSection === "meals") return this.renderMealsPanel();
     if (this.currentView === "month") return this.renderMonthGrid();
     if ((this.currentView === "week" || this.currentView === "work_week") && this.config?.show_empty_days !== false) {
       return this.renderWeekGrid();
@@ -2004,14 +2133,16 @@ var FamilyHubCalendarCard = class extends i4 {
       </div>`;
     if (this.config?.grouped_by_calendar) {
       const groups = this.groupedEvents(events);
-      return b2`${[...groups.entries()].map(
+      return b2`<div class="event-list">
+        ${[...groups.entries()].map(
         ([calendarName, grouped]) => b2`<section class="group">
-          <h3>${calendarName}</h3>
-          ${grouped.map((event) => this.renderEventItem(event))}
-        </section>`
-      )}`;
+            <h3>${calendarName}</h3>
+            ${grouped.map((event) => this.renderEventItem(event))}
+          </section>`
+      )}
+      </div>`;
     }
-    return b2`${events.map((event) => this.renderEventItem(event))}`;
+    return b2`<div class="event-list">${events.map((event) => this.renderEventItem(event))}</div>`;
   }
   renderModal() {
     if (!this.selectedEvent) return A;
@@ -2073,72 +2204,93 @@ var FamilyHubCalendarCard = class extends i4 {
     const title = this.config.title || "Family Hub Calendar";
     const views = this.config.enabled_views || [];
     const theme = this.config.theme_colors ?? {};
+    const orientableViews = ["day", "3day", "week", "work_week", "agenda"];
     return b2`<ha-card
       class="hub"
       @touchstart=${this.onTouchStart}
       @touchend=${this.onTouchEnd}
       style=${`--fhc-font-family:${this.config.font_family || "inherit"};--fhc-radius:${this.config.border_radius}px;--fhc-bg:${theme.background || "inherit"};--fhc-surface:${theme.surface || "inherit"};--fhc-text:${theme.text || "inherit"};--fhc-accent:${theme.accent || "var(--primary-color)"};`}
     >
-      ${this.config.show_header !== false ? b2`<header>
-            <div class="left">
-              <h1>${title}</h1>
-              <span class="date-line">${this.formatDateTime(this.currentDate)}</span>
-              ${this.renderCalendarLegend()}
-            </div>
-            <div class="right">
-              <div class="nav-group">
-                <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>‹</button>
-                <button class="today-btn" @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>${this.t("today")}</button>
-                <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>›</button>
-              </div>
-              <label class="date-jump">
-                <input
-                  type="date"
-                  title=${this.t("jump_to_date")}
-                  @change=${(e5) => {
+      <div class="layout">
+        ${this.renderSideNav()}
+        <div class="main-column">
+          ${this.config.show_header !== false ? b2`<header>
+                <div class="left">
+                  <h1>${title}</h1>
+                  <span class="date-line">${this.periodLabel()}</span>
+                  ${this.activeSection === "calendar" ? this.renderCalendarLegend() : A}
+                </div>
+                <div class="right">
+                  ${this.activeSection !== "tasks" ? b2`<div class="nav-group">
+                          <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>
+                            ‹
+                          </button>
+                          <button class="today-btn" @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>
+                            ${this.t("today")}
+                          </button>
+                          <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>
+                            ›
+                          </button>
+                        </div>
+                        <label class="date-jump">
+                          <input
+                            type="date"
+                            title=${this.t("jump_to_date")}
+                            @change=${(e5) => {
       const input = e5.target;
       const value = input.value ? new Date(input.value) : /* @__PURE__ */ new Date();
       if (!Number.isNaN(value.getTime())) this.currentDate = value;
     }}
-                />
-              </label>
-            </div>
-          </header>` : A}
+                          />
+                        </label>` : A}
+                </div>
+              </header>` : A}
 
-      <nav class="views">
-        <div class="segmented">
-          ${views.map(
-      (view) => b2`<button class=${view === this.currentView ? "active" : ""} @click=${() => this.currentView = view}>
-                ${this.t(view)}
-              </button>`
+          ${this.activeSection === "calendar" ? b2`<nav class="views">
+                <div class="segmented">
+                  ${views.map(
+      (view) => b2`<button
+                        class=${view === this.currentView ? "active" : ""}
+                        @click=${() => this.currentView = view}
+                      >
+                        ${this.t(view)}
+                      </button>`
     )}
-        </div>
-        <select
-          class="lang-select"
-          .value=${this.activeLanguage}
-          @change=${(e5) => {
-      this.languageOverridden = true;
-      this.activeLanguage = e5.target.value;
-    }}
-        >
-          <option value="en">EN</option>
-          <option value="fr">FR</option>
-        </select>
-      </nav>
+                </div>
+                ${orientableViews.includes(this.currentView) ? b2`<div class="orientation-toggle">
+                      <button
+                        class=${this.orientation === "vertical" ? "active" : ""}
+                        title=${this.t("vertical")}
+                        aria-label=${this.t("vertical")}
+                        @click=${() => this.orientation = "vertical"}
+                      >
+                        ↕
+                      </button>
+                      <button
+                        class=${this.orientation === "horizontal" ? "active" : ""}
+                        title=${this.t("horizontal")}
+                        aria-label=${this.t("horizontal")}
+                        @click=${() => this.orientation = "horizontal"}
+                      >
+                        ↔
+                      </button>
+                    </div>` : A}
+              </nav>` : A}
 
-      <div class="content ${this.config.show_sidebar === false ? "no-sidebar" : ""}">
-        <main>${this.renderEvents()}</main>
-        ${this.config.show_sidebar === false ? A : b2`<aside>
-              ${this.renderWeather()}
-              <section class="panel summary">
-                <h3>${this.t("daily_summary")}</h3>
-                <p class="summary-count">${this.visibleEvents().length}</p>
-                <p class="summary-label">events</p>
-              </section>
-            </aside>`}
+          <div class="content ${this.config.show_sidebar === false ? "no-sidebar" : ""}">
+            <main class="orientation-${this.orientation}">${this.renderEvents()}</main>
+            ${this.config.show_sidebar === false ? A : b2`<aside>
+                  ${this.renderWeather()}
+                  <section class="panel summary">
+                    <h3>${this.t("daily_summary")}</h3>
+                    <p class="summary-count">${this.visibleEvents().length}</p>
+                    <p class="summary-label">events</p>
+                  </section>
+                </aside>`}
+          </div>
+        </div>
       </div>
-      ${this.renderModal()}
-    </ha-card>`;
+    </ha-card>${this.renderModal()}`;
   }
 };
 FamilyHubCalendarCard.styles = i`
@@ -2154,6 +2306,94 @@ FamilyHubCalendarCard.styles = i`
       font-family: var(--fhc-font-family, inherit);
       overflow: hidden;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+    .layout {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .main-column {
+      flex: 1;
+      min-width: 0;
+    }
+    .side-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 88px;
+      flex-shrink: 0;
+    }
+    .side-nav-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      border: none;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
+      color: inherit;
+      border-radius: 12px;
+      padding: 10px 6px;
+      min-height: 52px;
+      cursor: pointer;
+      opacity: 0.75;
+    }
+    .side-nav-btn:hover {
+      opacity: 1;
+      background: var(--fhc-accent-soft);
+    }
+    .side-nav-btn.active {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+      opacity: 1;
+    }
+    .side-nav-icon {
+      font-size: 1.3rem;
+      line-height: 1;
+    }
+    .side-nav-label {
+      font-size: 0.7em;
+      font-weight: 600;
+      text-align: center;
+    }
+    .calendar-toggles {
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 10px 8px;
+      border-radius: 12px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
+    }
+    .calendar-toggles-title {
+      font-size: 0.7em;
+      font-weight: 700;
+      text-transform: uppercase;
+      opacity: 0.6;
+      letter-spacing: 0.04em;
+    }
+    .calendar-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78em;
+      cursor: pointer;
+      min-height: 28px;
+    }
+    .calendar-toggle input {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .calendar-toggle-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .calendar-toggle-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     header {
       display: flex;
@@ -2213,15 +2453,15 @@ FamilyHubCalendarCard.styles = i`
       padding: 4px;
     }
     .icon-nav {
-      width: 30px;
-      height: 30px;
+      width: 44px;
+      height: 44px;
       display: grid;
       place-items: center;
       border: none;
       border-radius: 999px;
       background: transparent;
       color: inherit;
-      font-size: 1.2rem;
+      font-size: 1.4rem;
       line-height: 1;
       cursor: pointer;
     }
@@ -2233,8 +2473,9 @@ FamilyHubCalendarCard.styles = i`
       background: transparent;
       color: inherit;
       font-weight: 600;
-      font-size: 0.85em;
-      padding: 6px 12px;
+      font-size: 0.9em;
+      padding: 10px 16px;
+      min-height: 44px;
       border-radius: 999px;
       cursor: pointer;
     }
@@ -2269,9 +2510,10 @@ FamilyHubCalendarCard.styles = i`
       border: none;
       background: transparent;
       color: inherit;
-      padding: 7px 14px;
+      padding: 10px 16px;
+      min-height: 40px;
       border-radius: 9px;
-      font-size: 0.85em;
+      font-size: 0.9em;
       font-weight: 500;
       cursor: pointer;
       opacity: 0.75;
@@ -2285,13 +2527,31 @@ FamilyHubCalendarCard.styles = i`
       color: #fff;
       opacity: 1;
     }
-    .lang-select {
-      border: 1px solid var(--divider-color, #374151);
-      border-radius: 8px;
+    .orientation-toggle {
+      display: flex;
+      gap: 2px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
+      border-radius: 12px;
+      padding: 3px;
+    }
+    .orientation-toggle button {
+      border: none;
       background: transparent;
       color: inherit;
-      padding: 5px 8px;
-      font-size: 0.8em;
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      font-size: 1rem;
+      cursor: pointer;
+      opacity: 0.75;
+    }
+    .orientation-toggle button:hover {
+      opacity: 1;
+    }
+    .orientation-toggle button.active {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+      opacity: 1;
     }
     .content {
       display: flex;
@@ -2308,6 +2568,28 @@ FamilyHubCalendarCard.styles = i`
       display: grid;
       gap: 8px;
       transition: transform 150ms ease, opacity 150ms ease;
+    }
+    .event-list {
+      display: grid;
+      gap: 8px;
+    }
+    main.orientation-horizontal .event-list {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    main.orientation-horizontal .event-list .event {
+      flex: 0 0 260px;
+    }
+    main.orientation-horizontal .week-grid {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    main.orientation-horizontal .week-day {
+      flex: 0 0 240px;
     }
     aside {
       width: min(35%, 320px);
@@ -2354,7 +2636,7 @@ FamilyHubCalendarCard.styles = i`
       gap: 4px;
     }
     .month-cell {
-      min-height: 84px;
+      min-height: 108px;
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
       border-radius: 10px;
       padding: 4px;
@@ -2376,10 +2658,10 @@ FamilyHubCalendarCard.styles = i`
       background: transparent;
       color: inherit;
       font-weight: 600;
-      font-size: 0.85em;
+      font-size: 0.9em;
       cursor: pointer;
-      width: 22px;
-      height: 22px;
+      width: 32px;
+      height: 32px;
       border-radius: 50%;
       display: grid;
       place-items: center;
@@ -2390,21 +2672,22 @@ FamilyHubCalendarCard.styles = i`
     }
     .month-cell-events {
       display: grid;
-      gap: 2px;
+      gap: 3px;
       align-content: start;
       overflow: hidden;
     }
     .cell-event {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
       border: none;
       background: transparent;
       color: inherit;
       text-align: left;
-      font-size: 0.72em;
-      padding: 1px 2px;
-      border-radius: 4px;
+      font-size: 0.8em;
+      padding: 4px 5px;
+      min-height: 24px;
+      border-radius: 6px;
       cursor: pointer;
       white-space: nowrap;
       overflow: hidden;
@@ -2414,16 +2697,16 @@ FamilyHubCalendarCard.styles = i`
       background: var(--fhc-accent-soft);
     }
     .cell-dot {
-      width: 6px;
-      height: 6px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
       background: var(--event-color, var(--fhc-accent));
       flex-shrink: 0;
     }
     .cell-more {
-      font-size: 0.7em;
+      font-size: 0.75em;
       opacity: 0.6;
-      padding: 0 2px;
+      padding: 2px 4px;
     }
     .week-grid {
       display: grid;
@@ -2464,15 +2747,16 @@ FamilyHubCalendarCard.styles = i`
       width: 100%;
       position: relative;
       display: grid;
-      grid-template-columns: auto 20px 1fr auto;
-      gap: 10px;
+      grid-template-columns: auto 26px 1fr auto;
+      gap: 12px;
       align-items: center;
       text-align: left;
       cursor: pointer;
+      min-height: 56px;
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
       background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 14px;
+      padding: 14px 16px;
       color: inherit;
       font: inherit;
       transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
@@ -2483,22 +2767,23 @@ FamilyHubCalendarCard.styles = i`
       background: var(--fhc-accent-soft);
     }
     .event-bar {
-      width: 4px;
+      width: 5px;
       align-self: stretch;
       border-radius: 4px;
       background: var(--event-color, var(--fhc-accent, var(--primary-color)));
     }
     .event-icon {
-      font-size: 1rem;
+      font-size: 1.2rem;
       opacity: 0.8;
     }
     .event-body {
       display: grid;
-      gap: 2px;
+      gap: 3px;
       min-width: 0;
     }
     .event-title {
       font-weight: 600;
+      font-size: 1.02em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -2508,14 +2793,14 @@ FamilyHubCalendarCard.styles = i`
       opacity: 0.6;
     }
     .event-meta {
-      font-size: 0.78em;
+      font-size: 0.82em;
       opacity: 0.65;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .event-time {
-      font-size: 0.8em;
+      font-size: 0.85em;
       opacity: 0.75;
       white-space: nowrap;
     }
@@ -2611,10 +2896,11 @@ FamilyHubCalendarCard.styles = i`
       border: none;
       background: rgba(255, 255, 255, 0.2);
       color: #fff;
-      width: 28px;
-      height: 28px;
+      width: 40px;
+      height: 40px;
       border-radius: 999px;
       cursor: pointer;
+      font-size: 1.1rem;
       line-height: 1;
     }
     .modal-body {
@@ -2654,10 +2940,11 @@ FamilyHubCalendarCard.styles = i`
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.3));
       background: transparent;
       color: inherit;
-      padding: 8px 14px;
+      padding: 12px 18px;
+      min-height: 44px;
       border-radius: 999px;
       cursor: pointer;
-      font-size: 0.85em;
+      font-size: 0.92em;
       font-weight: 500;
     }
     .pill:hover {
@@ -2686,6 +2973,19 @@ FamilyHubCalendarCard.styles = i`
         width: 100%;
       }
     }
+    @media (max-width: 700px) {
+      .layout {
+        flex-direction: column;
+      }
+      .side-nav {
+        flex-direction: row;
+        width: 100%;
+        overflow-x: auto;
+      }
+      .calendar-toggles {
+        display: none;
+      }
+    }
   `;
 __decorateClass([
   n4({ attribute: false })
@@ -2708,6 +3008,15 @@ __decorateClass([
 __decorateClass([
   r5()
 ], FamilyHubCalendarCard.prototype, "todoItemsByEntity", 2);
+__decorateClass([
+  r5()
+], FamilyHubCalendarCard.prototype, "activeSection", 2);
+__decorateClass([
+  r5()
+], FamilyHubCalendarCard.prototype, "orientation", 2);
+__decorateClass([
+  r5()
+], FamilyHubCalendarCard.prototype, "hiddenCalendarEntities", 2);
 FamilyHubCalendarCard = __decorateClass([
   t3("family-hub-calendar")
 ], FamilyHubCalendarCard);
