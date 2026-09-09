@@ -139,8 +139,7 @@ src/
     fr.json
 test/
   config.test.ts
-dist/
-  family-hub-calendar-card.js
+family-hub-calendar-card.js
 hacs.json
 package.json
 tsconfig.json
@@ -193,7 +192,7 @@ default_view: week
 ## 10) HACS Packaging Structure
 
 - `hacs.json` included with card name and filename
-- Build output: `dist/family-hub-calendar-card.js`
+- Build output committed at the repository root: `family-hub-calendar-card.js`
 - Ready for inclusion in a standard HACS custom repository
 
 ## Development

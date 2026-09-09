@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "Premium Home Assistant Family Hub Calendar custom card",
   "type": "module",
-  "main": "dist/family-hub-calendar-card.js",
+  "main": "family-hub-calendar-card.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=dist/family-hub-calendar-card.js",
+    "build": "esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=family-hub-calendar-card.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

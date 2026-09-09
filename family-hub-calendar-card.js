@@ -1038,7 +1038,7 @@ var localize = (key, language) => dictionaries[language][key] || dictionaries.en
 var DEFAULT_COLORS = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "#26A69A"];
 var parseDate = (value) => {
   if (typeof value !== "string") return void 0;
-  const parsed = new Date(value);
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value) ? /* @__PURE__ */ new Date(`${value}T00:00:00`) : new Date(value);
   return Number.isNaN(parsed.getTime()) ? void 0 : parsed;
 };
 var stateEvents = (state) => {
