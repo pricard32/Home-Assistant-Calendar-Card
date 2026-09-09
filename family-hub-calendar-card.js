@@ -826,14 +826,132 @@ var family_hub_calendar_editor_exports = {};
 __export(family_hub_calendar_editor_exports, {
   FamilyHubCalendarEditor: () => FamilyHubCalendarEditor
 });
-var FamilyHubCalendarEditor;
+var VIEW_OPTIONS, LANGUAGE_OPTIONS, WEEK_START_OPTIONS, TIME_FORMAT_OPTIONS, FONT_SIZE_OPTIONS, DENSITY_OPTIONS, WEATHER_PLACEMENT_OPTIONS, LABELS, MAIN_SCHEMA, THEME_FIELDS, familyMemberCounter, FamilyHubCalendarEditor;
 var init_family_hub_calendar_editor = __esm({
   "src/family-hub-calendar-editor.ts"() {
     "use strict";
     init_lit();
     init_decorators();
     init_config();
+    VIEW_OPTIONS = [
+      { value: "day", label: "Day" },
+      { value: "3day", label: "3-Day" },
+      { value: "week", label: "Week" },
+      { value: "work_week", label: "Work Week" },
+      { value: "month", label: "Month" },
+      { value: "agenda", label: "Agenda" },
+      { value: "timeline", label: "Timeline" }
+    ];
+    LANGUAGE_OPTIONS = [
+      { value: "en", label: "English" },
+      { value: "fr", label: "Fran\xE7ais" }
+    ];
+    WEEK_START_OPTIONS = [
+      { value: "1", label: "Monday" },
+      { value: "0", label: "Sunday" }
+    ];
+    TIME_FORMAT_OPTIONS = [
+      { value: "12h", label: "12-hour" },
+      { value: "24h", label: "24-hour" }
+    ];
+    FONT_SIZE_OPTIONS = [
+      { value: "small", label: "Small" },
+      { value: "medium", label: "Medium" },
+      { value: "large", label: "Large" }
+    ];
+    DENSITY_OPTIONS = [
+      { value: "comfortable", label: "Comfortable" },
+      { value: "compact", label: "Compact" }
+    ];
+    WEATHER_PLACEMENT_OPTIONS = [
+      { value: "header", label: "Header" },
+      { value: "sidebar", label: "Sidebar" },
+      { value: "day_cell", label: "Day cell" },
+      { value: "agenda", label: "Agenda" }
+    ];
+    LABELS = {
+      title: "Title",
+      default_view: "Default view",
+      enabled_views: "Enabled views",
+      language: "Language",
+      week_start_day: "Week starts on",
+      time_format: "Time format",
+      font_size: "Font size",
+      font_family: "Font family",
+      border_radius: "Corner radius",
+      event_density: "Event density",
+      weather_entity: "Weather entity",
+      weather_placement: "Weather placement",
+      task_entities: "Task (to-do) entities",
+      meal_entities: "Meal plan entities",
+      show_header: "Show header",
+      show_sidebar: "Show sidebar",
+      show_weather: "Show weather",
+      show_tasks: "Show tasks",
+      show_meals: "Show meals",
+      compact_mode: "Compact mode",
+      grouped_by_calendar: "Group events by calendar"
+    };
+    MAIN_SCHEMA = [
+      { name: "title", selector: { text: {} } },
+      {
+        type: "grid",
+        name: "",
+        schema: [
+          { name: "default_view", selector: { select: { mode: "dropdown", options: VIEW_OPTIONS } } },
+          { name: "language", selector: { select: { mode: "dropdown", options: LANGUAGE_OPTIONS } } }
+        ]
+      },
+      { name: "enabled_views", selector: { select: { multiple: true, mode: "list", options: VIEW_OPTIONS } } },
+      {
+        type: "grid",
+        name: "",
+        schema: [
+          { name: "week_start_day", selector: { select: { mode: "dropdown", options: WEEK_START_OPTIONS } } },
+          { name: "time_format", selector: { select: { mode: "dropdown", options: TIME_FORMAT_OPTIONS } } },
+          { name: "font_size", selector: { select: { mode: "dropdown", options: FONT_SIZE_OPTIONS } } },
+          { name: "event_density", selector: { select: { mode: "dropdown", options: DENSITY_OPTIONS } } }
+        ]
+      },
+      { name: "font_family", selector: { text: {} } },
+      { name: "border_radius", selector: { number: { min: 0, max: 32, step: 1, mode: "slider" } } },
+      {
+        type: "grid",
+        name: "",
+        schema: [
+          { name: "show_header", selector: { boolean: {} } },
+          { name: "show_sidebar", selector: { boolean: {} } },
+          { name: "show_weather", selector: { boolean: {} } },
+          { name: "show_tasks", selector: { boolean: {} } },
+          { name: "show_meals", selector: { boolean: {} } },
+          { name: "compact_mode", selector: { boolean: {} } },
+          { name: "grouped_by_calendar", selector: { boolean: {} } }
+        ]
+      },
+      {
+        type: "grid",
+        name: "",
+        schema: [
+          { name: "weather_entity", selector: { entity: { domain: "weather" } } },
+          { name: "weather_placement", selector: { select: { mode: "dropdown", options: WEATHER_PLACEMENT_OPTIONS } } }
+        ]
+      },
+      { name: "task_entities", selector: { entity: { multiple: true, domain: "todo" } } },
+      { name: "meal_entities", selector: { entity: { multiple: true } } }
+    ];
+    THEME_FIELDS = [
+      { key: "background", label: "Background" },
+      { key: "surface", label: "Surface" },
+      { key: "text", label: "Text" },
+      { key: "accent", label: "Accent" }
+    ];
+    familyMemberCounter = 0;
     FamilyHubCalendarEditor = class extends i4 {
+      constructor() {
+        super(...arguments);
+        this.newCalendarEntity = "";
+        this.computeLabel = (schema) => LABELS[schema.name] ?? schema.name;
+      }
       setConfig(config) {
         this.config = normalizeConfig(config);
       }
@@ -852,91 +970,327 @@ var init_family_hub_calendar_editor = __esm({
           })
         );
       }
-      updateCalendars(value) {
+      onFormChanged(event) {
         if (!this.config) return;
-        const existing = new Map(this.config.calendars.map((calendar) => [calendar.entity, calendar]));
-        const entities = value.split("\n").map((entity) => entity.trim()).filter(Boolean).map((entity) => existing.get(entity) ?? { entity });
-        this.updateValue("calendars", entities);
+        const value = event.detail.value;
+        const next = { ...this.config, ...value };
+        this.config = next;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: next },
+            bubbles: true,
+            composed: true
+          })
+        );
+      }
+      formData() {
+        if (!this.config) return {};
+        const data = {};
+        const collect = (schema) => {
+          schema.forEach((entry) => {
+            if (entry.type === "grid" && Array.isArray(entry.schema)) {
+              collect(entry.schema);
+              return;
+            }
+            const name = entry.name;
+            if (!name) return;
+            data[name] = this.config[name];
+          });
+        };
+        collect(MAIN_SCHEMA);
+        if (data.week_start_day !== void 0) data.week_start_day = String(data.week_start_day);
+        return data;
+      }
+      // --- Calendars -----------------------------------------------------
+      addCalendar(entity) {
+        if (!this.config || !entity) return;
+        if (this.config.calendars.some((calendar) => calendar.entity === entity)) return;
+        const calendars = [...this.config.calendars, { entity, enabled: true }];
+        this.updateValue("calendars", calendars);
+        this.newCalendarEntity = "";
+      }
+      updateCalendar(index, patch) {
+        if (!this.config) return;
+        const calendars = this.config.calendars.map((calendar, i5) => i5 === index ? { ...calendar, ...patch } : calendar);
+        this.updateValue("calendars", calendars);
+      }
+      removeCalendar(index) {
+        if (!this.config) return;
+        const calendars = this.config.calendars.filter((_2, i5) => i5 !== index);
+        this.updateValue("calendars", calendars);
+      }
+      renderCalendarsSection() {
+        if (!this.config) return A;
+        return b2`<div class="section">
+      <h3>Calendars</h3>
+      <p class="hint">Choose which calendar entities appear on the card, and customize their name and color.</p>
+      ${this.config.calendars.map(
+          (calendar, index) => b2`<div class="row calendar-row">
+          <input
+            type="color"
+            class="swatch"
+            .value=${calendar.color || "#4F86F7"}
+            @input=${(e5) => this.updateCalendar(index, { color: e5.target.value })}
+          />
+          <div class="row-main">
+            <span class="entity-id">${calendar.entity}</span>
+            <input
+              type="text"
+              placeholder="Display name"
+              .value=${calendar.name || ""}
+              @input=${(e5) => this.updateCalendar(index, { name: e5.target.value })}
+            />
+          </div>
+          <label class="enabled-toggle">
+            <input
+              type="checkbox"
+              .checked=${calendar.enabled !== false}
+              @change=${(e5) => this.updateCalendar(index, { enabled: e5.target.checked })}
+            />
+            Enabled
+          </label>
+          <button class="icon-btn" title="Remove" @click=${() => this.removeCalendar(index)}>✕</button>
+        </div>`
+        )}
+      <div class="add-row">
+        ${this.renderEntityPicker(
+          this.newCalendarEntity,
+          ["calendar"],
+          "Add a calendar entity",
+          (value) => this.addCalendar(value)
+        )}
+      </div>
+    </div>`;
+      }
+      // --- Family members --------------------------------------------------
+      updateFamilyMember(index, patch) {
+        if (!this.config) return;
+        const members = (this.config.family_members ?? []).map(
+          (member, i5) => i5 === index ? { ...member, ...patch } : member
+        );
+        this.updateValue("family_members", members);
+      }
+      addFamilyMember() {
+        if (!this.config) return;
+        familyMemberCounter += 1;
+        const member = { id: `member_${familyMemberCounter}`, name: "New member", color: "#60a5fa" };
+        this.updateValue("family_members", [...this.config.family_members ?? [], member]);
+      }
+      removeFamilyMember(index) {
+        if (!this.config) return;
+        const members = (this.config.family_members ?? []).filter((_2, i5) => i5 !== index);
+        this.updateValue("family_members", members);
+      }
+      renderFamilyMembersSection() {
+        if (!this.config) return A;
+        const members = this.config.family_members ?? [];
+        return b2`<div class="section">
+      <h3>Family members</h3>
+      <p class="hint">Add household members to color-code assigned events and tasks.</p>
+      ${members.map(
+          (member, index) => b2`<div class="row member-row">
+          <input
+            type="color"
+            class="swatch"
+            .value=${member.color || "#60a5fa"}
+            @input=${(e5) => this.updateFamilyMember(index, { color: e5.target.value })}
+          />
+          <div class="row-main">
+            <input
+              type="text"
+              placeholder="Name"
+              .value=${member.name}
+              @input=${(e5) => this.updateFamilyMember(index, { name: e5.target.value })}
+            />
+            <input
+              type="text"
+              placeholder="Avatar URL (optional)"
+              .value=${member.avatar || ""}
+              @input=${(e5) => this.updateFamilyMember(index, { avatar: e5.target.value })}
+            />
+          </div>
+          <button class="icon-btn" title="Remove" @click=${() => this.removeFamilyMember(index)}>✕</button>
+        </div>`
+        )}
+      <button class="add-btn" @click=${() => this.addFamilyMember()}>+ Add family member</button>
+    </div>`;
+      }
+      // --- Theme colors ------------------------------------------------------
+      updateThemeColor(key, value) {
+        if (!this.config) return;
+        this.updateValue("theme_colors", { ...this.config.theme_colors, [key]: value });
+      }
+      renderThemeSection() {
+        if (!this.config) return A;
+        const colors = this.config.theme_colors ?? {};
+        return b2`<div class="section">
+      <h3>Theme colors</h3>
+      <p class="hint">Accepts hex colors or CSS variables (e.g. var(--primary-color)).</p>
+      <div class="theme-grid">
+        ${THEME_FIELDS.map(
+          (field) => b2`<label class="theme-field">
+            ${field.label}
+            <input
+              type="text"
+              .value=${colors[field.key] || ""}
+              @input=${(e5) => this.updateThemeColor(field.key, e5.target.value)}
+            />
+          </label>`
+        )}
+      </div>
+    </div>`;
+      }
+      // --- Entity picker helper -----------------------------------------------
+      renderEntityPicker(value, includeDomains, label, onPick) {
+        const picker = customElements.get("ha-entity-picker");
+        if (picker && this.hass) {
+          return b2`<ha-entity-picker
+        .hass=${this.hass}
+        .value=${value}
+        .includeDomains=${includeDomains}
+        .label=${label}
+        allow-custom-entity
+        @value-changed=${(e5) => {
+            const id = e5.detail.value;
+            if (id) onPick(id);
+          }}
+      ></ha-entity-picker>`;
+        }
+        return b2`<input
+      type="text"
+      placeholder=${label}
+      .value=${value}
+      @change=${(e5) => {
+          const input = e5.target;
+          onPick(input.value.trim());
+          input.value = "";
+        }}
+    />`;
+      }
+      renderForm() {
+        const formEl = customElements.get("ha-form");
+        if (formEl && this.hass) {
+          return b2`<ha-form
+        .hass=${this.hass}
+        .data=${this.formData()}
+        .schema=${MAIN_SCHEMA}
+        .computeLabel=${this.computeLabel}
+        @value-changed=${(e5) => this.onFormChanged(e5)}
+      ></ha-form>`;
+        }
+        return b2`<p class="hint">Full form controls require the Home Assistant frontend.</p>`;
       }
       render() {
         if (!this.config) return b2``;
-        return b2`<div class="form">
-      <label>
-        Title
-        <input
-          type="text"
-          .value=${this.config.title || ""}
-          @input=${(e5) => this.updateValue("title", e5.target.value)}
-        />
-      </label>
-      <label>
-        Calendar entities (one per line)
-        <textarea
-          rows="6"
-          @input=${(e5) => this.updateCalendars(e5.target.value)}
-        >${this.config.calendars.map((calendar) => calendar.entity).join("\n")}</textarea>
-      </label>
-      <label>
-        Default view
-        <select
-          .value=${this.config.default_view || "week"}
-          @change=${(e5) => this.updateValue("default_view", e5.target.value)}
-        >
-          <option value="day">Day</option>
-          <option value="3day">3-Day</option>
-          <option value="week">Week</option>
-          <option value="work_week">Work Week</option>
-          <option value="month">Month</option>
-          <option value="agenda">Agenda</option>
-          <option value="timeline">Timeline</option>
-        </select>
-      </label>
-      <label>
-        Language
-        <select
-          .value=${this.config.language || "en"}
-          @change=${(e5) => this.updateValue("language", e5.target.value)}
-        >
-          <option value="en">English</option>
-          <option value="fr">Français</option>
-        </select>
-      </label>
-      <label>
-        Weather entity
-        <input
-          type="text"
-          .value=${this.config.weather_entity || ""}
-          @input=${(e5) => this.updateValue("weather_entity", e5.target.value)}
-        />
-      </label>
-      <label>
-        Show tasks
-        <input
-          type="checkbox"
-          .checked=${this.config.show_tasks !== false}
-          @change=${(e5) => this.updateValue("show_tasks", e5.target.checked)}
-        />
-      </label>
-      <label>
-        Show meals
-        <input
-          type="checkbox"
-          .checked=${this.config.show_meals !== false}
-          @change=${(e5) => this.updateValue("show_meals", e5.target.checked)}
-        />
-      </label>
+        return b2`<div class="editor">
+      <div class="section">${this.renderForm()}</div>
+      ${this.renderCalendarsSection()} ${this.renderFamilyMembersSection()} ${this.renderThemeSection()}
     </div>`;
       }
     };
     FamilyHubCalendarEditor.styles = i`
-    .form {
+    .editor {
       display: grid;
-      gap: 12px;
+      gap: 16px;
+      padding: 4px 0 12px;
     }
-    label {
+    .section {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--divider-color, #374151);
+      border-radius: 12px;
+    }
+    .section h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .hint {
+      margin: 0;
+      font-size: 0.85em;
+      opacity: 0.7;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--divider-color, #374151);
+    }
+    .row:last-of-type {
+      border-bottom: none;
+    }
+    .row-main {
       display: grid;
       gap: 4px;
-      font-size: 14px;
+      flex: 1;
+      min-width: 0;
+    }
+    .entity-id {
+      font-size: 0.75em;
+      opacity: 0.65;
+      font-family: monospace;
+    }
+    .swatch {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: none;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, #374151);
+      background: var(--card-background-color, transparent);
+      color: inherit;
+    }
+    .enabled-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.85em;
+      white-space: nowrap;
+    }
+    .icon-btn {
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-size: 1rem;
+      opacity: 0.6;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .icon-btn:hover {
+      opacity: 1;
+      background: color-mix(in srgb, currentColor 10%, transparent);
+    }
+    .add-row {
+      margin-top: 4px;
+    }
+    .add-btn {
+      justify-self: start;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px dashed var(--divider-color, #374151);
+      background: none;
+      cursor: pointer;
+      color: var(--primary-color, inherit);
+    }
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+    }
+    .theme-field {
+      display: grid;
+      gap: 4px;
+      font-size: 0.85em;
     }
   `;
     __decorateClass([
@@ -945,6 +1299,9 @@ var init_family_hub_calendar_editor = __esm({
     __decorateClass([
       r5()
     ], FamilyHubCalendarEditor.prototype, "config", 2);
+    __decorateClass([
+      r5()
+    ], FamilyHubCalendarEditor.prototype, "newCalendarEntity", 2);
     FamilyHubCalendarEditor = __decorateClass([
       t3("family-hub-calendar-editor")
     ], FamilyHubCalendarEditor);
@@ -1314,36 +1671,99 @@ var FamilyHubCalendarCard = class extends i4 {
     });
     this.closeModal();
   }
+  weatherIcon(condition) {
+    const icons = {
+      "clear-night": "\u{1F319}",
+      cloudy: "\u2601\uFE0F",
+      exceptional: "\u26A0\uFE0F",
+      fog: "\u{1F32B}\uFE0F",
+      hail: "\u{1F328}\uFE0F",
+      lightning: "\u26C8\uFE0F",
+      "lightning-rainy": "\u26C8\uFE0F",
+      partlycloudy: "\u26C5",
+      pouring: "\u{1F327}\uFE0F",
+      rainy: "\u{1F327}\uFE0F",
+      snowy: "\u2744\uFE0F",
+      "snowy-rainy": "\u{1F328}\uFE0F",
+      sunny: "\u2600\uFE0F",
+      windy: "\u{1F32C}\uFE0F",
+      "windy-variant": "\u{1F32C}\uFE0F"
+    };
+    return icons[condition] || "\u{1F324}\uFE0F";
+  }
   renderWeather() {
     if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return A;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return A;
-    const forecast = Array.isArray(weather.attributes.forecast) ? weather.attributes.forecast.slice(0, 3) : [];
+    const forecast = Array.isArray(weather.attributes.forecast) ? weather.attributes.forecast.slice(0, 4) : [];
+    const unit = String(weather.attributes.temperature_unit ?? "\xB0");
     return b2`<section class="panel weather">
       <h3>${this.t("weather")}</h3>
-      <div class="weather-current">${weather.state} · ${String(weather.attributes.temperature ?? "-")}</div>
+      <div class="weather-current">
+        <span class="weather-icon">${this.weatherIcon(weather.state)}</span>
+        <span class="weather-temp">${String(weather.attributes.temperature ?? "-")}${unit}</span>
+        <span class="weather-condition">${weather.state.replace(/-/g, " ")}</span>
+      </div>
       <div class="forecast">
         ${forecast.map(
       (day) => b2`<div class="forecast-item">
-            <span>${String(day.datetime ?? "")}</span>
-            <span>${String(day.condition ?? "")}</span>
-            <span>${String(day.temperature ?? "-")}/${String(day.templow ?? "-")}</span>
-            <span>${String(day.precipitation_probability ?? "0")}%</span>
+            <span class="forecast-day">
+              ${new Intl.DateTimeFormat(this.activeLanguage === "fr" ? "fr-FR" : "en-US", { weekday: "short" }).format(
+        new Date(String(day.datetime ?? Date.now()))
+      )}
+            </span>
+            <span class="forecast-icon">${this.weatherIcon(String(day.condition ?? ""))}</span>
+            <span class="forecast-temps"
+              ><b>${String(day.temperature ?? "-")}°</b>/${String(day.templow ?? "-")}°</span
+            >
           </div>`
     )}
       </div>
     </section>`;
   }
+  sourceIcon(event) {
+    if (event.sourceType === "task") return "\u2713";
+    if (event.sourceType === "meal") return "\u{1F37D}";
+    return "\u{1F4C5}";
+  }
+  renderCalendarLegend() {
+    if (!this.config) return A;
+    const calendars = this.config.calendars.filter((calendar) => calendar.enabled !== false);
+    if (calendars.length < 2) return A;
+    return b2`<div class="legend">
+      ${calendars.map(
+      (calendar) => b2`<span class="legend-item">
+          <span class="legend-dot" style=${`background:${calendar.color || "var(--fhc-accent)"}`}></span>
+          ${calendar.name || calendar.entity}
+        </span>`
+    )}
+    </div>`;
+  }
   renderEventItem(event) {
-    return b2`<button class="event" @click=${() => this.selectedEvent = event}>
-      <span class="dot" style=${`background:${event.calendarColor}`}></span>
-      <span class="event-title">${event.title}</span>
-      <span class="event-time">${this.formatDateTime(event.start)}</span>
+    const isToday = (/* @__PURE__ */ new Date()).toDateString() === event.start.toDateString();
+    return b2`<button
+      class="event ${event.completed ? "completed" : ""}"
+      style=${`--event-color:${event.calendarColor}`}
+      @click=${() => this.selectedEvent = event}
+    >
+      <span class="event-bar"></span>
+      <span class="event-icon">${this.sourceIcon(event)}</span>
+      <span class="event-body">
+        <span class="event-title">${event.title}</span>
+        <span class="event-meta">${event.calendarName}${event.location ? ` \xB7 ${event.location}` : ""}</span>
+      </span>
+      <span class="event-time ${isToday ? "today" : ""}">
+        ${event.allDay ? this.t("day") : this.formatDateTime(event.start).split(", ").pop()}
+      </span>
     </button>`;
   }
   renderEvents() {
     const events = this.visibleEvents();
-    if (!events.length) return b2`<div class="empty">${this.t("no_events")}</div>`;
+    if (!events.length)
+      return b2`<div class="empty">
+        <span class="empty-icon">🗓️</span>
+        <span>${this.t("no_events")}</span>
+      </div>`;
     if (this.config?.grouped_by_calendar) {
       const groups = this.groupedEvents(events);
       return b2`${[...groups.entries()].map(
@@ -1371,54 +1791,72 @@ var FamilyHubCalendarCard = class extends i4 {
         aria-modal="true"
         aria-labelledby="fhc-modal-title"
         tabindex="-1"
+        style=${`--event-color:${event.calendarColor}`}
         @click=${(e5) => e5.stopPropagation()}
       >
-        <button class="modal-close" aria-label=${this.t("close")} @click=${() => this.closeModal()}>×</button>
-        <h2 id="fhc-modal-title">${this.t("details")}</h2>
-        <h3>${event.title}</h3>
-        <p>${event.description || ""}</p>
-        <p><strong>${this.t("start")}:</strong> ${this.formatDateTime(event.start)}</p>
-        <p><strong>${this.t("end")}:</strong> ${this.formatDateTime(event.end)}</p>
-        <p><strong>${this.t("duration")}:</strong> ${eventDuration(event)}</p>
-        <p><strong>${this.t("calendar")}:</strong> ${event.calendarName}</p>
-        ${event.location ? b2`<p><strong>${this.t("location")}:</strong> ${event.location}</p>` : A}
-        ${event.organizer ? b2`<p><strong>${this.t("organizer")}:</strong> ${event.organizer}</p>` : A}
-        ${event.attendees?.length ? b2`<p><strong>${this.t("attendees")}:</strong> ${event.attendees.join(", ")}</p>` : A}
-        ${event.links?.length ? b2`<p><strong>${this.t("links")}:</strong> ${event.links.join(" \xB7 ")}</p>` : A}
-        <div class="actions">
-          <button @click=${() => this.editEvent(event)}>${this.t("edit")}</button>
-          <button @click=${() => this.deleteEvent(event)}>${this.t("delete")}</button>
-          <button @click=${() => this.copyEventDetails(event)}>${this.t("copy")}</button>
-          ${event.location ? b2`<button @click=${() => window.open(`https://maps.google.com/?q=${encodeURIComponent(event.location)}`)}>
-                ${this.t("open_map")}
-              </button>` : A}
+        <div class="modal-banner">
+          <span class="modal-source">${this.sourceIcon(event)} ${event.calendarName}</span>
+          <button class="modal-close" aria-label=${this.t("close")} @click=${() => this.closeModal()}>✕</button>
+        </div>
+        <div class="modal-body">
+          <h2 id="fhc-modal-title">${event.title}</h2>
+          ${event.description ? b2`<p class="modal-description">${event.description}</p>` : A}
+          <div class="modal-facts">
+            <div class="fact"><span class="fact-label">${this.t("start")}</span><span>${this.formatDateTime(event.start)}</span></div>
+            <div class="fact"><span class="fact-label">${this.t("end")}</span><span>${this.formatDateTime(event.end)}</span></div>
+            <div class="fact"><span class="fact-label">${this.t("duration")}</span><span>${eventDuration(event)}</span></div>
+            ${event.location ? b2`<div class="fact"><span class="fact-label">${this.t("location")}</span><span>${event.location}</span></div>` : A}
+            ${event.organizer ? b2`<div class="fact"><span class="fact-label">${this.t("organizer")}</span><span>${event.organizer}</span></div>` : A}
+            ${event.attendees?.length ? b2`<div class="fact">
+                  <span class="fact-label">${this.t("attendees")}</span><span>${event.attendees.join(", ")}</span>
+                </div>` : A}
+            ${event.links?.length ? b2`<div class="fact"><span class="fact-label">${this.t("links")}</span><span>${event.links.join(" \xB7 ")}</span></div>` : A}
+          </div>
+          <div class="actions">
+            <button class="pill" @click=${() => this.editEvent(event)}>✎ ${this.t("edit")}</button>
+            <button class="pill danger" @click=${() => this.deleteEvent(event)}>🗑 ${this.t("delete")}</button>
+            <button class="pill" @click=${() => this.copyEventDetails(event)}>⧉ ${this.t("copy")}</button>
+            ${event.location ? b2`<button
+                  class="pill"
+                  @click=${() => window.open(`https://maps.google.com/?q=${encodeURIComponent(event.location)}`)}
+                >
+                  📍 ${this.t("open_map")}
+                </button>` : A}
+          </div>
         </div>
       </section>
     </div>`;
   }
   render() {
-    if (!this.config) return b2`<ha-card><div class="empty">Configuration required</div></ha-card>`;
+    if (!this.config)
+      return b2`<ha-card
+        ><div class="empty"><span class="empty-icon">⚠️</span><span>Configuration required</span></div></ha-card
+      >`;
     const title = this.config.title || "Family Hub Calendar";
     const views = this.config.enabled_views || [];
+    const theme = this.config.theme_colors ?? {};
     return b2`<ha-card
       class="hub"
       @touchstart=${this.onTouchStart}
       @touchend=${this.onTouchEnd}
-      style=${`--fhc-font-family:${this.config.font_family || "inherit"};--fhc-radius:${this.config.border_radius}px;`}
+      style=${`--fhc-font-family:${this.config.font_family || "inherit"};--fhc-radius:${this.config.border_radius}px;--fhc-bg:${theme.background || "inherit"};--fhc-surface:${theme.surface || "inherit"};--fhc-text:${theme.text || "inherit"};--fhc-accent:${theme.accent || "var(--primary-color)"};`}
     >
       ${this.config.show_header !== false ? b2`<header>
             <div class="left">
               <h1>${title}</h1>
-              <span>${this.formatDateTime(this.currentDate)}</span>
+              <span class="date-line">${this.formatDateTime(this.currentDate)}</span>
+              ${this.renderCalendarLegend()}
             </div>
             <div class="right">
-              <button @click=${() => this.movePeriod(-1)}>${this.t("previous")}</button>
-              <button @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>${this.t("today")}</button>
-              <button @click=${() => this.movePeriod(1)}>${this.t("next")}</button>
-              <label>
-                ${this.t("jump_to_date")}
+              <div class="nav-group">
+                <button class="icon-nav" aria-label=${this.t("previous")} @click=${() => this.movePeriod(-1)}>‹</button>
+                <button class="today-btn" @click=${() => this.currentDate = /* @__PURE__ */ new Date()}>${this.t("today")}</button>
+                <button class="icon-nav" aria-label=${this.t("next")} @click=${() => this.movePeriod(1)}>›</button>
+              </div>
+              <label class="date-jump">
                 <input
                   type="date"
+                  title=${this.t("jump_to_date")}
                   @change=${(e5) => {
       const input = e5.target;
       const value = input.value ? new Date(input.value) : /* @__PURE__ */ new Date();
@@ -1430,20 +1868,23 @@ var FamilyHubCalendarCard = class extends i4 {
           </header>` : A}
 
       <nav class="views">
-        ${views.map(
+        <div class="segmented">
+          ${views.map(
       (view) => b2`<button class=${view === this.currentView ? "active" : ""} @click=${() => this.currentView = view}>
-            ${this.t(view)}
-          </button>`
+                ${this.t(view)}
+              </button>`
     )}
+        </div>
         <select
+          class="lang-select"
           .value=${this.activeLanguage}
           @change=${(e5) => {
       this.languageOverridden = true;
       this.activeLanguage = e5.target.value;
     }}
         >
-          <option value="en">English</option>
-          <option value="fr">Français</option>
+          <option value="en">EN</option>
+          <option value="fr">FR</option>
         </select>
       </nav>
 
@@ -1453,7 +1894,8 @@ var FamilyHubCalendarCard = class extends i4 {
               ${this.renderWeather()}
               <section class="panel summary">
                 <h3>${this.t("daily_summary")}</h3>
-                <p>${this.visibleEvents().length} events</p>
+                <p class="summary-count">${this.visibleEvents().length}</p>
+                <p class="summary-label">events</p>
               </section>
             </aside>`}
       </div>
@@ -1466,32 +1908,158 @@ FamilyHubCalendarCard.styles = i`
       display: block;
     }
     .hub {
+      --fhc-accent-soft: color-mix(in srgb, var(--fhc-accent, var(--primary-color)) 16%, transparent);
+      background: var(--fhc-bg, var(--ha-card-background, var(--card-background-color)));
+      color: var(--fhc-text, var(--primary-text-color));
       border-radius: var(--fhc-radius, 16px);
-      padding: 16px;
+      padding: 18px;
       font-family: var(--fhc-font-family, inherit);
       overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     }
-    header,
-    .views,
-    .content,
-    .actions,
-    .forecast-item {
+    header {
       display: flex;
-      gap: 8px;
-      align-items: center;
+      gap: 12px;
+      align-items: flex-start;
       justify-content: space-between;
       flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+    .left {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .left h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .date-line {
+      opacity: 0.7;
+      font-size: 0.95em;
+      text-transform: capitalize;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78em;
+      opacity: 0.85;
+    }
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .nav-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
+      border-radius: 999px;
+      padding: 4px;
+    }
+    .icon-nav {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      font-size: 1.2rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .icon-nav:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .today-btn {
+      border: none;
+      background: transparent;
+      color: inherit;
+      font-weight: 600;
+      font-size: 0.85em;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .today-btn:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .date-jump input[type="date"] {
+      border: 1px solid var(--divider-color, #374151);
+      border-radius: 8px;
+      padding: 5px 8px;
+      background: transparent;
+      color: inherit;
+      font-size: 0.85em;
     }
     .views {
-      margin: 8px 0 12px;
-      justify-content: flex-start;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 12px 0 14px;
+      flex-wrap: wrap;
     }
-    .views button.active {
-      background: var(--primary-color);
-      color: white;
+    .segmented {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 6%, transparent));
+      border-radius: 12px;
+      padding: 3px;
+    }
+    .segmented button {
+      border: none;
+      background: transparent;
+      color: inherit;
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-size: 0.85em;
+      font-weight: 500;
+      cursor: pointer;
+      opacity: 0.75;
+      transition: background 120ms ease, opacity 120ms ease;
+    }
+    .segmented button:hover {
+      opacity: 1;
+    }
+    .segmented button.active {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+      opacity: 1;
+    }
+    .lang-select {
+      border: 1px solid var(--divider-color, #374151);
+      border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      padding: 5px 8px;
+      font-size: 0.8em;
     }
     .content {
+      display: flex;
+      gap: 14px;
       align-items: flex-start;
+      flex-wrap: wrap;
     }
     .content.no-sidebar aside {
       display: none;
@@ -1506,41 +2074,145 @@ FamilyHubCalendarCard.styles = i`
     aside {
       width: min(35%, 320px);
       display: grid;
-      gap: 8px;
+      gap: 12px;
     }
     .panel,
-    .event,
     .group {
-      border: 1px solid var(--divider-color, #374151);
-      border-radius: 12px;
-      padding: 10px;
-      background: color-mix(in srgb, var(--ha-card-background, #111827) 85%, white 15%);
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+      border-radius: 14px;
+      padding: 14px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
+    }
+    .panel h3,
+    .group h3 {
+      margin: 0 0 8px;
+      font-size: 0.85em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      opacity: 0.65;
+    }
+    .group {
+      display: grid;
+      gap: 6px;
     }
     .event {
       width: 100%;
+      position: relative;
       display: grid;
-      grid-template-columns: 12px 1fr auto;
-      gap: 8px;
+      grid-template-columns: auto 20px 1fr auto;
+      gap: 10px;
       align-items: center;
       text-align: left;
       cursor: pointer;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 4%, transparent));
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: inherit;
+      font: inherit;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
+    .event:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+      background: var(--fhc-accent-soft);
+    }
+    .event-bar {
+      width: 4px;
+      align-self: stretch;
+      border-radius: 4px;
+      background: var(--event-color, var(--fhc-accent, var(--primary-color)));
+    }
+    .event-icon {
+      font-size: 1rem;
+      opacity: 0.8;
+    }
+    .event-body {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
     }
     .event-title {
       font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .event.completed .event-title {
+      text-decoration: line-through;
+      opacity: 0.6;
+    }
+    .event-meta {
+      font-size: 0.78em;
+      opacity: 0.65;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .event-time {
-      opacity: 0.85;
-      font-size: 0.9em;
+      font-size: 0.8em;
+      opacity: 0.75;
+      white-space: nowrap;
+    }
+    .event-time.today {
+      color: var(--fhc-accent, var(--primary-color));
+      font-weight: 700;
+    }
+    .weather-current {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 1rem;
+    }
+    .weather-icon {
+      font-size: 1.6rem;
+    }
+    .weather-temp {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+    .weather-condition {
+      opacity: 0.65;
+      font-size: 0.85em;
+      text-transform: capitalize;
+    }
+    .forecast {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      justify-content: space-between;
+    }
+    .forecast-item {
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+      font-size: 0.78em;
+      flex: 1;
+    }
+    .forecast-day {
+      text-transform: capitalize;
+      opacity: 0.7;
+    }
+    .forecast-icon {
+      font-size: 1.1rem;
+    }
+    .summary-count {
+      margin: 0;
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--fhc-accent, var(--primary-color));
+      line-height: 1;
+    }
+    .summary-label {
+      margin: 2px 0 0;
+      opacity: 0.6;
+      font-size: 0.8em;
     }
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(2px);
       display: grid;
       place-items: center;
       z-index: 1000;
@@ -1548,28 +2220,98 @@ FamilyHubCalendarCard.styles = i`
     }
     .modal {
       position: relative;
-      width: min(680px, 100%);
-      max-height: 80vh;
+      width: min(560px, 100%);
+      max-height: 85vh;
       overflow: auto;
-      background: var(--card-background-color);
-      border-radius: 14px;
-      padding: 16px;
+      background: var(--card-background-color, #fff);
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+    }
+    .modal-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      background: var(--event-color, var(--fhc-accent));
+      color: #fff;
+    }
+    .modal-source {
+      font-size: 0.85em;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .modal-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      font-size: 1.2rem;
+      border: none;
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      cursor: pointer;
       line-height: 1;
-      padding: 4px 8px;
+    }
+    .modal-body {
+      padding: 18px 20px 20px;
+    }
+    .modal-body h2 {
+      margin: 0 0 6px;
+      font-size: 1.3rem;
+    }
+    .modal-description {
+      opacity: 0.8;
+      margin: 0 0 12px;
+    }
+    .modal-facts {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .fact {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.9em;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.15));
+    }
+    .fact-label {
+      opacity: 0.6;
+      font-weight: 600;
     }
     .actions {
-      justify-content: flex-start;
-      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.3));
+      background: transparent;
+      color: inherit;
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.85em;
+      font-weight: 500;
+    }
+    .pill:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .pill.danger {
+      color: #ef4444;
+      border-color: color-mix(in srgb, #ef4444 40%, transparent);
     }
     .empty {
-      opacity: 0.8;
-      padding: 8px;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      opacity: 0.7;
+      padding: 32px 8px;
+      text-align: center;
+    }
+    .empty-icon {
+      font-size: 2rem;
     }
     @media (max-width: 900px) {
       .content {

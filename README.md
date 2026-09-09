@@ -29,12 +29,11 @@ FamilyHubCalendarCard (LitElement)
   - event modal (details, copy, edit/delete service hooks, map launch)
   - tasks, meals, weather sections
 - `family-hub-calendar-editor` (visual editor)
-  - title
-  - calendar entities
-  - default view
-  - language
-  - weather entity
-  - task/meal toggles
+  - Fully configurable through the Lovelace UI — no YAML required
+  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, section toggles, weather entity/placement, and task/meal entities
+  - Calendar picker (`ha-entity-picker`, filtered to `calendar.*`) with per-calendar name, color, and enabled toggle
+  - Family member list editor (name, avatar, color) for assignment color-coding
+  - Theme color fields (background/surface/text/accent), accepting hex values or CSS variables
 
 ## 3) Data Model
 
