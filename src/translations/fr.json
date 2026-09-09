@@ -29,5 +29,10 @@
   "meals": "Repas",
   "daily_summary": "Résumé du jour",
   "no_events": "Aucun événement sur cette période",
-  "more": "de plus"
+  "more": "de plus",
+  "no_tasks": "Aucune tâche",
+  "no_meals": "Aucun repas prévu",
+  "vertical": "Vertical",
+  "horizontal": "Horizontal",
+  "calendars": "Calendriers"
 }

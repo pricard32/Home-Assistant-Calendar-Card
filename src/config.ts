@@ -29,6 +29,7 @@ export const DEFAULT_CONFIG: Omit<FamilyHubCalendarConfig, "type" | "calendars">
   border_radius: 16,
   show_empty_days: true,
   theme_preset: "auto",
+  layout_orientation: "vertical",
   theme_colors: {
     background: "var(--ha-card-background, #111827)",
     surface: "var(--card-background-color, #1f2937)",

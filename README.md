@@ -17,22 +17,24 @@ FamilyHubCalendarCard (LitElement)
   ├─ Localization layer (en/fr + auto-detect)
   ├─ Data model layer (merge/sort events+tasks+meals)
   ├─ View state layer (day/3-day/week/work week/month/agenda/timeline)
-  ├─ Interaction layer (swipe, prev/next, today, date jump, modal)
+  ├─ Interaction layer (section nav, swipe, prev/next, today, date jump, live calendar toggles, orientation toggle, modal)
   └─ Rendering layer (header, sidebar, weather, grouped/merged timeline)
 ```
 
 ## 2) Component Breakdown
 
 - `family-hub-calendar` (main card)
-  - navigation + animated view switching
-  - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow)
+  - left-hand side panel to switch between Calendar / Tasks / Meal Planner sections, plus a live per-calendar visibility toggle list
+  - navigation + animated view switching, with a vertical/horizontal layout toggle for day/3-day/week/work-week/agenda views
+  - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow) with the month/year name shown in the header
   - week/work-week grid showing every day (with a "no events" placeholder) or a compact agenda list
   - merged or grouped calendars
-  - event modal (details, copy, edit/delete service hooks, map launch)
+  - large, touch-friendly event bubbles sized for wall-mounted touch panels
+  - event modal (details, copy, delete, map launch; "Edit" opens the calendar entity's native more-info dialog since Home Assistant has no generic edit-event service)
   - tasks, meals, weather sections
 - `family-hub-calendar-editor` (visual editor)
   - Fully configurable through the Lovelace UI — no YAML required
-  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, section toggles (including "show empty days"), weather entity/placement, and task/meal entities
+  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, layout orientation, section toggles (including "show empty days"), weather entity/placement, and task/meal entities
   - Calendar picker (`ha-entity-picker`, filtered to `calendar.*`) with per-calendar name, color picker (native swatch + quick palette), and enabled toggle
   - Family member list editor (name, avatar, color picker) for assignment color-coding
   - Theme preset selector (Home Assistant auto, Midnight, Light, Sunset, Forest, Ocean, or Custom) plus individual color fields/pickers (background/surface/text/accent), accepting hex values or CSS variables
@@ -92,6 +94,7 @@ compact_mode: false
 border_radius: 16
 show_empty_days: true # render full week/month grids even for days without events
 theme_preset: auto # auto | midnight | light | sunset | forest | ocean | custom
+layout_orientation: vertical # vertical | horizontal (default arrangement for day/3-day/week/work-week/agenda views)
 
 theme_colors:
   background: "#0f172a"
