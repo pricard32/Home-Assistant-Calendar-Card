@@ -853,7 +853,9 @@ var init_family_hub_calendar_editor = __esm({
         );
       }
       updateCalendars(value) {
-        const entities = value.split("\n").map((entity) => entity.trim()).filter(Boolean).map((entity) => ({ entity }));
+        if (!this.config) return;
+        const existing = new Map(this.config.calendars.map((calendar) => [calendar.entity, calendar]));
+        const entities = value.split("\n").map((entity) => entity.trim()).filter(Boolean).map((entity) => existing.get(entity) ?? { entity });
         this.updateValue("calendars", entities);
       }
       render() {
@@ -1092,12 +1094,12 @@ var extractCalendarEvents = (hass, calendars) => {
   });
   return events;
 };
-var extractTasks = (hass, taskEntities = []) => {
+var extractTasks = (hass, taskEntities = [], itemsByEntity = {}) => {
   const tasks = [];
   taskEntities.forEach((entity) => {
     const state = hass.states[entity];
     if (!state) return;
-    const items = Array.isArray(state.attributes.items) ? state.attributes.items : [];
+    const items = itemsByEntity[entity] ?? [];
     items.forEach((item, index) => {
       const due = parseDate(item.due ?? item.due_date);
       if (!due) return;
@@ -1164,10 +1166,15 @@ var FamilyHubCalendarCard = class extends i4 {
     this.currentDate = /* @__PURE__ */ new Date();
     this.currentView = "week";
     this.activeLanguage = "en";
+    this.todoItemsByEntity = {};
+    this.languageOverridden = false;
+    this.fetchedTodoEntities = "";
   }
   setConfig(config) {
     this.config = normalizeConfig(config);
     this.currentView = this.config.default_view || "week";
+    this.languageOverridden = false;
+    this.lastDetectedLocale = this.hass?.locale?.language;
     this.activeLanguage = detectLanguage(this.hass, this.config.language);
   }
   getCardSize() {
@@ -1183,9 +1190,35 @@ var FamilyHubCalendarCard = class extends i4 {
       calendars: [{ entity: "calendar.family" }]
     };
   }
-  updated() {
-    if (this.config) {
-      this.activeLanguage = detectLanguage(this.hass, this.config.language);
+  updated(changedProps) {
+    if (this.config && !this.languageOverridden && changedProps.has("hass")) {
+      const hassLocale = this.hass?.locale?.language;
+      if (hassLocale !== this.lastDetectedLocale) {
+        this.lastDetectedLocale = hassLocale;
+        this.activeLanguage = detectLanguage(this.hass, this.config.language);
+      }
+    }
+    this.refreshTodoItems();
+  }
+  refreshTodoItems() {
+    if (!this.hass || !this.config || this.config.show_tasks === false) return;
+    const entities = this.config.task_entities ?? [];
+    const key = entities.join(",");
+    if (key === this.fetchedTodoEntities) return;
+    this.fetchedTodoEntities = key;
+    entities.forEach((entity) => {
+      void this.fetchTodoItems(entity);
+    });
+  }
+  async fetchTodoItems(entity) {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({
+        type: "todo/item/list",
+        entity_id: entity
+      });
+      this.todoItemsByEntity = { ...this.todoItemsByEntity, [entity]: response.items ?? [] };
+    } catch {
     }
   }
   t(key) {
@@ -1194,7 +1227,7 @@ var FamilyHubCalendarCard = class extends i4 {
   allEvents() {
     if (!this.hass || !this.config) return [];
     const calendarEvents = extractCalendarEvents(this.hass, this.config.calendars);
-    const taskEvents = this.config.show_tasks === false ? [] : extractTasks(this.hass, this.config.task_entities);
+    const taskEvents = this.config.show_tasks === false ? [] : extractTasks(this.hass, this.config.task_entities, this.todoItemsByEntity);
     const mealEvents = this.config.show_meals === false ? [] : extractMeals(this.hass, this.config.meal_entities);
     return sortEvents([...calendarEvents, ...taskEvents, ...mealEvents]);
   }
@@ -1376,7 +1409,10 @@ var FamilyHubCalendarCard = class extends i4 {
     )}
         <select
           .value=${this.activeLanguage}
-          @change=${(e5) => this.activeLanguage = e5.target.value}
+          @change=${(e5) => {
+      this.languageOverridden = true;
+      this.activeLanguage = e5.target.value;
+    }}
         >
           <option value="en">English</option>
           <option value="fr">Français</option>
@@ -1525,6 +1561,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], FamilyHubCalendarCard.prototype, "selectedEvent", 2);
+__decorateClass([
+  r5()
+], FamilyHubCalendarCard.prototype, "todoItemsByEntity", 2);
 FamilyHubCalendarCard = __decorateClass([
   t3("family-hub-calendar")
 ], FamilyHubCalendarCard);

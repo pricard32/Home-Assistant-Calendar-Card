@@ -14,10 +14,12 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   @state() private currentView = "week";
   @state() private activeLanguage: SupportedLanguage = "en";
   @state() private selectedEvent?: HubEvent;
+  @state() private todoItemsByEntity: Record<string, Record<string, unknown>[]> = {};
 
   private swipeStartX?: number;
   private languageOverridden = false;
   private lastDetectedLocale?: string;
+  private fetchedTodoEntities = "";
 
   public setConfig(config: FamilyHubCalendarConfig): void {
     this.config = normalizeConfig(config);
@@ -51,6 +53,31 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
         this.activeLanguage = detectLanguage(this.hass, this.config.language);
       }
     }
+    this.refreshTodoItems();
+  }
+
+  private refreshTodoItems(): void {
+    if (!this.hass || !this.config || this.config.show_tasks === false) return;
+    const entities = this.config.task_entities ?? [];
+    const key = entities.join(",");
+    if (key === this.fetchedTodoEntities) return;
+    this.fetchedTodoEntities = key;
+    entities.forEach((entity) => {
+      void this.fetchTodoItems(entity);
+    });
+  }
+
+  private async fetchTodoItems(entity: string): Promise<void> {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS<{ items: Record<string, unknown>[] }>({
+        type: "todo/item/list",
+        entity_id: entity
+      });
+      this.todoItemsByEntity = { ...this.todoItemsByEntity, [entity]: response.items ?? [] };
+    } catch {
+      // Ignore errors fetching todo items; the entity simply won't contribute tasks.
+    }
   }
 
   private t(key: string): string {
@@ -61,7 +88,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     if (!this.hass || !this.config) return [];
 
     const calendarEvents = extractCalendarEvents(this.hass, this.config.calendars);
-    const taskEvents = this.config.show_tasks === false ? [] : extractTasks(this.hass, this.config.task_entities);
+    const taskEvents =
+      this.config.show_tasks === false
+        ? []
+        : extractTasks(this.hass, this.config.task_entities, this.todoItemsByEntity);
     const mealEvents = this.config.show_meals === false ? [] : extractMeals(this.hass, this.config.meal_entities);
 
     return sortEvents([...calendarEvents, ...taskEvents, ...mealEvents]);

@@ -100,13 +100,17 @@ export const extractCalendarEvents = (
   return events;
 };
 
-export const extractTasks = (hass: HomeAssistant, taskEntities: string[] = []): HubEvent[] => {
+export const extractTasks = (
+  hass: HomeAssistant,
+  taskEntities: string[] = [],
+  itemsByEntity: Record<string, Record<string, unknown>[]> = {}
+): HubEvent[] => {
   const tasks: HubEvent[] = [];
   taskEntities.forEach((entity) => {
     const state = hass.states[entity];
     if (!state) return;
 
-    const items = Array.isArray(state.attributes.items) ? (state.attributes.items as Record<string, unknown>[]) : [];
+    const items = itemsByEntity[entity] ?? [];
     items.forEach((item, index) => {
       const due = parseDate(item.due ?? item.due_date);
       if (!due) return;
