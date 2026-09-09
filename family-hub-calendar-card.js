@@ -974,7 +974,7 @@ var init_family_hub_calendar_editor = __esm({
       show_meals: "Show meals",
       compact_mode: "Compact mode",
       grouped_by_calendar: "Group events by calendar",
-      show_empty_days: "Show full week/month grid (even empty days)",
+      show_empty_days: "Show adjacent month days in month grid",
       layout_orientation: "Default layout orientation"
     };
     MAIN_SCHEMA = [
@@ -1713,7 +1713,9 @@ var FamilyHubCalendarCard = class extends i4 {
     this.activeSection = "calendar";
     this.orientation = "vertical";
     this.hiddenCalendarEntities = /* @__PURE__ */ new Set();
+    this.dailyForecast = [];
     this.fetchedTodoEntities = "";
+    this.fetchedForecastEntity = "";
   }
   setConfig(config) {
     this.config = normalizeConfig(config);
@@ -1744,6 +1746,7 @@ var FamilyHubCalendarCard = class extends i4 {
       }
     }
     this.refreshTodoItems();
+    this.refreshWeatherForecast();
     if (changedProps.has("selectedEvent")) {
       if (this.selectedEvent) {
         this.modalReturnFocusElement = document.activeElement ?? void 0;
@@ -1775,6 +1778,30 @@ var FamilyHubCalendarCard = class extends i4 {
         entity_id: entity
       });
       this.todoItemsByEntity = { ...this.todoItemsByEntity, [entity]: response.items ?? [] };
+    } catch {
+    }
+  }
+  refreshWeatherForecast() {
+    const entity = this.config?.weather_entity;
+    if (!entity) {
+      this.fetchedForecastEntity = "";
+      this.dailyForecast = [];
+      return;
+    }
+    if (entity === this.fetchedForecastEntity) return;
+    this.fetchedForecastEntity = entity;
+    void this.fetchWeatherForecast(entity);
+  }
+  async fetchWeatherForecast(entity) {
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS({
+        type: "weather/get_forecasts",
+        entity_id: [entity],
+        forecast_type: "daily"
+      });
+      if (entity !== this.config?.weather_entity) return;
+      this.dailyForecast = response?.[entity]?.forecast ?? [];
     } catch {
     }
   }
@@ -1921,7 +1948,8 @@ var FamilyHubCalendarCard = class extends i4 {
     if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return A;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return A;
-    const forecast = Array.isArray(weather.attributes.forecast) ? weather.attributes.forecast.slice(0, 4) : [];
+    const legacyForecast = Array.isArray(weather.attributes.forecast) ? weather.attributes.forecast : [];
+    const forecast = (this.dailyForecast.length ? this.dailyForecast : legacyForecast).slice(0, 4);
     const unit = String(weather.attributes.temperature_unit ?? "\xB0");
     return b2`<section class="panel weather">
       <h3>${this.t("weather")}</h3>
@@ -2024,7 +2052,8 @@ var FamilyHubCalendarCard = class extends i4 {
   forecastForDay(day) {
     if (!this.hass || !this.config?.weather_entity) return void 0;
     const weather = this.hass.states[this.config.weather_entity];
-    const forecast = Array.isArray(weather?.attributes.forecast) ? weather.attributes.forecast : [];
+    const legacyForecast = Array.isArray(weather?.attributes.forecast) ? weather.attributes.forecast : [];
+    const forecast = this.dailyForecast.length ? this.dailyForecast : legacyForecast;
     const dayKey = day.toDateString();
     return forecast.find((entry) => {
       const value = entry.datetime;
@@ -2094,6 +2123,70 @@ var FamilyHubCalendarCard = class extends i4 {
     )}
     </div>`;
   }
+  timeGridHourRange(events) {
+    let start = 7;
+    let end = 21;
+    events.forEach((event) => {
+      if (event.allDay) return;
+      const startHour = event.start.getHours();
+      const endHour = event.end.getHours() + (event.end.getMinutes() > 0 || event.end <= event.start ? 1 : 0);
+      if (startHour < start) start = Math.max(0, startHour);
+      if (endHour > end) end = Math.min(24, endHour);
+    });
+    return { start, end };
+  }
+  layoutTimeGridEvents(events, startHour, endHour) {
+    const totalMinutes = (endHour - startHour) * 60;
+    const sorted = [...events].sort((a3, b3) => a3.start.getTime() - b3.start.getTime());
+    const results = [];
+    let cluster = [];
+    let clusterEnd = -Infinity;
+    const clusters = [];
+    sorted.forEach((event) => {
+      if (cluster.length && event.start.getTime() >= clusterEnd) {
+        clusters.push(cluster);
+        cluster = [];
+        clusterEnd = -Infinity;
+      }
+      cluster.push(event);
+      clusterEnd = Math.max(clusterEnd, event.end.getTime());
+    });
+    if (cluster.length) clusters.push(cluster);
+    clusters.forEach((clusterEvents) => {
+      const lanes = [];
+      clusterEvents.forEach((event) => {
+        const lane = lanes.find((candidate) => candidate[candidate.length - 1].end.getTime() <= event.start.getTime());
+        if (lane) lane.push(event);
+        else lanes.push([event]);
+      });
+      const laneCount = lanes.length;
+      lanes.forEach((lane, laneIndex) => {
+        lane.forEach((event) => {
+          const startMinutes = Math.min(
+            Math.max(event.start.getHours() * 60 + event.start.getMinutes() - startHour * 60, 0),
+            totalMinutes
+          );
+          const rawEndMinutes = event.end.getHours() * 60 + event.end.getMinutes() - startHour * 60;
+          const endMinutes = Math.min(Math.max(rawEndMinutes, startMinutes + 20), totalMinutes);
+          results.push({
+            event,
+            top: startMinutes / totalMinutes * 100,
+            height: Math.max((endMinutes - startMinutes) / totalMinutes * 100, 2.5),
+            left: laneIndex / laneCount * 100,
+            width: 1 / laneCount * 100
+          });
+        });
+      });
+    });
+    return results;
+  }
+  renderNowLine(startHour, endHour) {
+    const now = /* @__PURE__ */ new Date();
+    const totalMinutes = (endHour - startHour) * 60;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes() - startHour * 60;
+    if (nowMinutes < 0 || nowMinutes > totalMinutes) return A;
+    return b2`<div class="time-now-line" style=${`top:${nowMinutes / totalMinutes * 100}%`}></div>`;
+  }
   renderWeekGrid() {
     if (!this.config) return A;
     const weekStartDay = this.config.week_start_day ?? 1;
@@ -2101,23 +2194,69 @@ var FamilyHubCalendarCard = class extends i4 {
     const events = this.allEvents();
     const todayKey = (/* @__PURE__ */ new Date()).toDateString();
     const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
-    return b2`<div class="week-grid">
-      ${days.map((day) => {
-      const dayEvents = eventsOnDay(events, day);
+    const use24h = this.config.time_format === "24h";
+    const eventsPerDay = days.map((day) => eventsOnDay(events, day));
+    const timedPerDay = eventsPerDay.map((list) => list.filter((event) => !event.allDay));
+    const allDayPerDay = eventsPerDay.map((list) => list.filter((event) => event.allDay));
+    const hasAllDay = allDayPerDay.some((list) => list.length);
+    const { start: gridStart, end: gridEnd } = this.timeGridHourRange(timedPerDay.flat());
+    const hours = Array.from({ length: gridEnd - gridStart }, (_2, i5) => gridStart + i5);
+    const formatHour = (hour) => new Intl.DateTimeFormat(locale, { hour: "numeric", hour12: !use24h }).format(new Date(2e3, 0, 1, hour));
+    return b2`<div class="time-grid">
+      <div class="time-grid-header">
+        <div class="time-gutter"></div>
+        ${days.map((day) => {
       const isToday = day.toDateString() === todayKey;
-      return b2`<section class="week-day ${isToday ? "today" : ""}">
-          <header class="week-day-header">
-            <span class="week-day-name">
-              ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
-            </span>
+      return b2`<div class="time-day-header ${isToday ? "today" : ""}" @click=${() => this.jumpToDay(day)}>
+            <span class="time-day-name">${new Intl.DateTimeFormat(locale, { weekday: "short" }).format(day)}</span>
+            <span class="time-day-num">${day.getDate()}</span>
             ${this.renderDayWeather(day)}
-            <span class="week-day-count">${dayEvents.length}</span>
-          </header>
-          <div class="week-day-events">
-            ${dayEvents.length ? dayEvents.map((event) => this.renderEventItem(event, true)) : b2`<div class="empty-day">${this.t("no_events")}</div>`}
-          </div>
-        </section>`;
+          </div>`;
     })}
+      </div>
+      ${hasAllDay ? b2`<div class="time-grid-allday">
+            <div class="time-gutter"></div>
+            ${allDayPerDay.map(
+      (list) => b2`<div class="time-allday-cell">
+                ${list.map(
+        (event) => b2`<button
+                    class="cell-event"
+                    style=${`--event-color:${event.calendarColor}`}
+                    title=${event.title}
+                    @click=${() => this.selectedEvent = event}
+                  >
+                    <span class="cell-dot"></span>${event.title}
+                  </button>`
+      )}
+              </div>`
+    )}
+          </div>` : A}
+      <div class="time-grid-body">
+        <div class="time-gutter-col">
+          ${hours.map((hour) => b2`<div class="time-hour-label">${formatHour(hour)}</div>`)}
+        </div>
+        ${days.map((day, dayIndex) => {
+      const isToday = day.toDateString() === todayKey;
+      return b2`<div class="time-day-col ${isToday ? "today" : ""}">
+            ${hours.map(() => b2`<div class="time-hour-cell"></div>`)}
+            ${this.layoutTimeGridEvents(timedPerDay[dayIndex], gridStart, gridEnd).map(
+        ({ event, top, height, left, width }) => b2`<button
+                class="time-event ${event.completed ? "completed" : ""}"
+                style=${`--event-color:${event.calendarColor};top:${top}%;height:${height}%;left:${left}%;width:${width}%`}
+                title=${event.title}
+                @click=${() => this.selectedEvent = event}
+              >
+                <span class="time-event-title">${event.title}</span>
+                <span class="time-event-time">${this.formatDateTime(event.start).split(", ").pop()}</span>
+                <span class="time-event-badge" style=${`background:${event.calendarColor}`}
+                  >${event.calendarName.charAt(0).toUpperCase()}</span
+                >
+              </button>`
+      )}
+            ${isToday ? this.renderNowLine(gridStart, gridEnd) : A}
+          </div>`;
+    })}
+      </div>
     </div>`;
   }
   renderEventItem(event, compact = false) {
@@ -2176,7 +2315,7 @@ var FamilyHubCalendarCard = class extends i4 {
     if (this.activeSection === "tasks") return this.renderTasksPanel();
     if (this.activeSection === "meals") return this.renderMealsPanel();
     if (this.currentView === "month") return this.renderMonthGrid();
-    if ((this.currentView === "week" || this.currentView === "work_week") && this.config?.show_empty_days !== false) {
+    if (this.currentView === "week" || this.currentView === "work_week") {
       return this.renderWeekGrid();
     }
     const events = this.visibleEvents();
@@ -2355,6 +2494,7 @@ FamilyHubCalendarCard.styles = i`
       --fhc-month-cell-h: 92px;
       --fhc-chip-min-h: 20px;
       --fhc-chip-pad: 3px 6px;
+      --fhc-hour-h: 44px;
     }
     .hub.density-comfortable {
       --fhc-event-min-h: 56px;
@@ -2363,6 +2503,7 @@ FamilyHubCalendarCard.styles = i`
       --fhc-month-cell-h: 108px;
       --fhc-chip-min-h: 24px;
       --fhc-chip-pad: 4px 7px;
+      --fhc-hour-h: 56px;
     }
     .hub.density-large {
       --fhc-event-min-h: 76px;
@@ -2371,6 +2512,7 @@ FamilyHubCalendarCard.styles = i`
       --fhc-month-cell-h: 136px;
       --fhc-chip-min-h: 32px;
       --fhc-chip-pad: 6px 10px;
+      --fhc-hour-h: 72px;
     }
     .hub.density-extra_large {
       --fhc-event-min-h: 96px;
@@ -2379,6 +2521,7 @@ FamilyHubCalendarCard.styles = i`
       --fhc-month-cell-h: 168px;
       --fhc-chip-min-h: 40px;
       --fhc-chip-pad: 8px 14px;
+      --fhc-hour-h: 88px;
     }
     .layout {
       display: flex;
@@ -2867,6 +3010,177 @@ FamilyHubCalendarCard.styles = i`
       font-size: 0.85em;
       padding: 6px 2px;
     }
+    .time-grid {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .time-grid-header {
+      display: flex;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      background: color-mix(in srgb, var(--fhc-accent, var(--primary-color)) 5%, transparent);
+    }
+    .time-gutter {
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .time-day-header {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      justify-items: center;
+      gap: 2px;
+      padding: 8px 4px;
+      cursor: pointer;
+      font-size: 0.8em;
+      font-weight: 700;
+      text-transform: capitalize;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-day-name {
+      opacity: 0.6;
+      font-size: 0.85em;
+    }
+    .time-day-num {
+      font-size: 1.15rem;
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+    }
+    .time-day-header.today .time-day-num {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+    }
+    .time-grid-allday {
+      display: flex;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      padding: 4px 0;
+    }
+    .time-allday-cell {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      padding: 2px 4px;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-grid-body {
+      display: flex;
+      overflow-y: auto;
+      max-height: min(70vh, 640px);
+    }
+    .time-gutter-col {
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .time-hour-label {
+      height: var(--fhc-hour-h, 56px);
+      box-sizing: border-box;
+      padding: 2px 8px 0 0;
+      text-align: right;
+      font-size: 0.7em;
+      font-weight: 600;
+      opacity: 0.5;
+      transform: translateY(-0.6em);
+    }
+    .time-day-col {
+      flex: 1;
+      min-width: 0;
+      position: relative;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-day-col.today {
+      background: var(--fhc-accent-soft);
+    }
+    .time-hour-cell {
+      height: var(--fhc-hour-h, 56px);
+      box-sizing: border-box;
+      border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-hour-cell:first-child {
+      border-top: none;
+    }
+    .time-event {
+      position: absolute;
+      display: grid;
+      align-content: start;
+      gap: 1px;
+      margin: 0 2px;
+      padding: 3px 6px;
+      border: none;
+      border-radius: 8px;
+      border-left: 3px solid var(--event-color, var(--fhc-accent));
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 32%, white);
+      color: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 65%, #10131a);
+      text-align: left;
+      font: inherit;
+      font-size: var(--fhc-event-font, 0.78em);
+      overflow: hidden;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      transition: transform 120ms ease, box-shadow 120ms ease, z-index 0ms;
+      z-index: 1;
+    }
+    .time-event:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+      z-index: 2;
+    }
+    .time-event.completed {
+      opacity: 0.6;
+      text-decoration: line-through;
+    }
+    .time-event-title {
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .time-event-time {
+      font-size: 0.85em;
+      opacity: 0.8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .time-event-badge {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.62em;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8);
+    }
+    .time-now-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #ef4444;
+      z-index: 3;
+    }
+    .time-now-line::before {
+      content: "";
+      position: absolute;
+      left: -4px;
+      top: -3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
     .event {
       width: 100%;
       position: relative;
@@ -3171,6 +3485,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], FamilyHubCalendarCard.prototype, "hiddenCalendarEntities", 2);
+__decorateClass([
+  r5()
+], FamilyHubCalendarCard.prototype, "dailyForecast", 2);
 FamilyHubCalendarCard = __decorateClass([
   t3("family-hub-calendar")
 ], FamilyHubCalendarCard);

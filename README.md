@@ -29,10 +29,10 @@ FamilyHubCalendarCard (LitElement)
   - compact weather badge (icon + current temperature) in the header, alongside a full weather panel in the sidebar
   - navigation + animated view switching; the day/3-day/agenda vertical/horizontal layout is set from the visual editor's "layout orientation" field only, so the live card UI stays uncluttered
   - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow) with the month/year name shown in the header
-  - week/work-week view rendered as real side-by-side day columns (like a physical wall calendar), each with an event-count pill, showing every day (with a "no events" placeholder) or a compact agenda list
+  - week/work-week view rendered as a true hourly time grid: day columns with an hour ruler, events positioned and sized by their actual start/end time (overlapping events share the column width), a live "now" indicator line, and an all-day event strip above the grid — like a physical/digital wall calendar
   - merged or grouped calendars
-  - large, touch-friendly, color-tinted event bubbles sized for wall-mounted touch panels, with four event-density presets (`compact`, `comfortable`, `large`, `extra_large`) — the two larger presets are tuned for big/wall-mounted displays
-  - optional per-day weather badge (icon + high/low) rendered directly in month/week day cells when `weather_placement: day_cell` is configured
+  - large, touch-friendly, color-tinted event bubbles sized for wall-mounted touch panels, with four event-density presets (`compact`, `comfortable`, `large`, `extra_large`) — the two larger presets are tuned for big/wall-mounted displays and also control the time grid's hour row height
+  - per-day weather badge (icon + high/low) shown in month grid cells and in the week time grid's day headers when `weather_placement: day_cell` is configured; forecasts are fetched on demand via Home Assistant's `weather/get_forecasts` command so day-cell weather works even on modern HA versions that no longer expose it as a state attribute
   - floating quick-add button that opens Home Assistant's native "add event" dialog for the first visible calendar
   - event modal (details, copy, delete, map launch; "Edit" opens the calendar entity's native more-info dialog since Home Assistant has no generic edit-event service)
   - tasks, meals, weather sections
@@ -96,7 +96,7 @@ show_weather: true
 event_density: comfortable # compact | comfortable | large | extra_large (large/extra_large are for big wall-mounted displays)
 compact_mode: false
 border_radius: 16
-show_empty_days: true # render full week/month grids even for days without events
+show_empty_days: true # month grid also shows adjacent-month days to fill every week row (week view always shows all 7 days as time-grid columns)
 theme_preset: auto # auto | midnight | light | sunset | forest | ocean | custom
 layout_orientation: vertical # vertical | horizontal (default arrangement for day/3-day/week/work-week/agenda views)
 

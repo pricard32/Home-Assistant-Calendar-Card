@@ -26,10 +26,12 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   @state() private activeSection: "calendar" | "tasks" | "meals" = "calendar";
   @state() private orientation: "vertical" | "horizontal" = "vertical";
   @state() private hiddenCalendarEntities: Set<string> = new Set();
+  @state() private dailyForecast: Record<string, unknown>[] = [];
 
   private swipeStartX?: number;
   private lastDetectedLocale?: string;
   private fetchedTodoEntities = "";
+  private fetchedForecastEntity = "";
   private modalReturnFocusElement?: HTMLElement;
 
   public setConfig(config: FamilyHubCalendarConfig): void {
@@ -65,6 +67,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       }
     }
     this.refreshTodoItems();
+    this.refreshWeatherForecast();
 
     if ((changedProps as Map<PropertyKey, unknown>).has("selectedEvent")) {
       if (this.selectedEvent) {
@@ -102,6 +105,35 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       this.todoItemsByEntity = { ...this.todoItemsByEntity, [entity]: response.items ?? [] };
     } catch {
       // Ignore errors fetching todo items; the entity simply won't contribute tasks.
+    }
+  }
+
+  private refreshWeatherForecast(): void {
+    const entity = this.config?.weather_entity;
+    if (!entity) {
+      this.fetchedForecastEntity = "";
+      this.dailyForecast = [];
+      return;
+    }
+    if (entity === this.fetchedForecastEntity) return;
+    this.fetchedForecastEntity = entity;
+    void this.fetchWeatherForecast(entity);
+  }
+
+  private async fetchWeatherForecast(entity: string): Promise<void> {
+    // Modern Home Assistant no longer populates weather.attributes.forecast by default; the
+    // daily forecast must be requested on demand via this websocket command instead.
+    if (!this.hass?.callWS) return;
+    try {
+      const response = await this.hass.callWS<Record<string, { forecast?: Record<string, unknown>[] }>>({
+        type: "weather/get_forecasts",
+        entity_id: [entity],
+        forecast_type: "daily"
+      });
+      if (entity !== this.config?.weather_entity) return;
+      this.dailyForecast = response?.[entity]?.forecast ?? [];
+    } catch {
+      // Ignore errors fetching the forecast; day-cell weather badges simply won't render.
     }
   }
 
@@ -274,9 +306,10 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     if (!this.hass || !this.config?.weather_entity || this.config.show_weather === false) return nothing;
     const weather = this.hass.states[this.config.weather_entity];
     if (!weather) return nothing;
-    const forecast = Array.isArray(weather.attributes.forecast)
-      ? (weather.attributes.forecast as Record<string, unknown>[]).slice(0, 4)
+    const legacyForecast = Array.isArray(weather.attributes.forecast)
+      ? (weather.attributes.forecast as Record<string, unknown>[])
       : [];
+    const forecast = (this.dailyForecast.length ? this.dailyForecast : legacyForecast).slice(0, 4);
     const unit = String(weather.attributes.temperature_unit ?? "°");
 
     return html`<section class="panel weather">
@@ -389,9 +422,13 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
   private forecastForDay(day: Date): Record<string, unknown> | undefined {
     if (!this.hass || !this.config?.weather_entity) return undefined;
     const weather = this.hass.states[this.config.weather_entity];
-    const forecast = Array.isArray(weather?.attributes.forecast)
+    const legacyForecast = Array.isArray(weather?.attributes.forecast)
       ? (weather!.attributes.forecast as Record<string, unknown>[])
       : [];
+    // Prefer the on-demand daily forecast fetched via `weather/get_forecasts` (modern Home
+    // Assistant no longer populates the `forecast` attribute by default), falling back to the
+    // legacy attribute for older HA versions/integrations that still expose it.
+    const forecast = this.dailyForecast.length ? this.dailyForecast : legacyForecast;
     const dayKey = day.toDateString();
     return forecast.find((entry) => {
       const value = entry.datetime;
@@ -472,6 +509,81 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     </div>`;
   }
 
+  private timeGridHourRange(events: HubEvent[]): { start: number; end: number } {
+    let start = 7;
+    let end = 21;
+    events.forEach((event) => {
+      if (event.allDay) return;
+      const startHour = event.start.getHours();
+      const endHour = event.end.getHours() + (event.end.getMinutes() > 0 || event.end <= event.start ? 1 : 0);
+      if (startHour < start) start = Math.max(0, startHour);
+      if (endHour > end) end = Math.min(24, endHour);
+    });
+    return { start, end };
+  }
+
+  private layoutTimeGridEvents(
+    events: HubEvent[],
+    startHour: number,
+    endHour: number
+  ): Array<{ event: HubEvent; top: number; height: number; left: number; width: number }> {
+    const totalMinutes = (endHour - startHour) * 60;
+    const sorted = [...events].sort((a, b) => a.start.getTime() - b.start.getTime());
+    const results: Array<{ event: HubEvent; top: number; height: number; left: number; width: number }> = [];
+
+    // Group overlapping events into clusters, then greedily assign each event to the first lane
+    // whose previous occupant has already ended, so overlapping events share the column's width.
+    let cluster: HubEvent[] = [];
+    let clusterEnd = -Infinity;
+    const clusters: HubEvent[][] = [];
+    sorted.forEach((event) => {
+      if (cluster.length && event.start.getTime() >= clusterEnd) {
+        clusters.push(cluster);
+        cluster = [];
+        clusterEnd = -Infinity;
+      }
+      cluster.push(event);
+      clusterEnd = Math.max(clusterEnd, event.end.getTime());
+    });
+    if (cluster.length) clusters.push(cluster);
+
+    clusters.forEach((clusterEvents) => {
+      const lanes: HubEvent[][] = [];
+      clusterEvents.forEach((event) => {
+        const lane = lanes.find((candidate) => candidate[candidate.length - 1].end.getTime() <= event.start.getTime());
+        if (lane) lane.push(event);
+        else lanes.push([event]);
+      });
+      const laneCount = lanes.length;
+      lanes.forEach((lane, laneIndex) => {
+        lane.forEach((event) => {
+          const startMinutes = Math.min(
+            Math.max(event.start.getHours() * 60 + event.start.getMinutes() - startHour * 60, 0),
+            totalMinutes
+          );
+          const rawEndMinutes = event.end.getHours() * 60 + event.end.getMinutes() - startHour * 60;
+          const endMinutes = Math.min(Math.max(rawEndMinutes, startMinutes + 20), totalMinutes);
+          results.push({
+            event,
+            top: (startMinutes / totalMinutes) * 100,
+            height: Math.max(((endMinutes - startMinutes) / totalMinutes) * 100, 2.5),
+            left: (laneIndex / laneCount) * 100,
+            width: (1 / laneCount) * 100
+          });
+        });
+      });
+    });
+    return results;
+  }
+
+  private renderNowLine(startHour: number, endHour: number) {
+    const now = new Date();
+    const totalMinutes = (endHour - startHour) * 60;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes() - startHour * 60;
+    if (nowMinutes < 0 || nowMinutes > totalMinutes) return nothing;
+    return html`<div class="time-now-line" style=${`top:${(nowMinutes / totalMinutes) * 100}%`}></div>`;
+  }
+
   private renderWeekGrid() {
     if (!this.config) return nothing;
     const weekStartDay = this.config.week_start_day ?? 1;
@@ -479,26 +591,75 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     const events = this.allEvents();
     const todayKey = new Date().toDateString();
     const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const use24h = this.config.time_format === "24h";
 
-    return html`<div class="week-grid">
-      ${days.map((day) => {
-        const dayEvents = eventsOnDay(events, day);
-        const isToday = day.toDateString() === todayKey;
-        return html`<section class="week-day ${isToday ? "today" : ""}">
-          <header class="week-day-header">
-            <span class="week-day-name">
-              ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
-            </span>
+    const eventsPerDay = days.map((day) => eventsOnDay(events, day));
+    const timedPerDay = eventsPerDay.map((list) => list.filter((event) => !event.allDay));
+    const allDayPerDay = eventsPerDay.map((list) => list.filter((event) => event.allDay));
+    const hasAllDay = allDayPerDay.some((list) => list.length);
+    const { start: gridStart, end: gridEnd } = this.timeGridHourRange(timedPerDay.flat());
+    const hours = Array.from({ length: gridEnd - gridStart }, (_, i) => gridStart + i);
+
+    const formatHour = (hour: number) =>
+      new Intl.DateTimeFormat(locale, { hour: "numeric", hour12: !use24h }).format(new Date(2000, 0, 1, hour));
+
+    return html`<div class="time-grid">
+      <div class="time-grid-header">
+        <div class="time-gutter"></div>
+        ${days.map((day) => {
+          const isToday = day.toDateString() === todayKey;
+          return html`<div class="time-day-header ${isToday ? "today" : ""}" @click=${() => this.jumpToDay(day)}>
+            <span class="time-day-name">${new Intl.DateTimeFormat(locale, { weekday: "short" }).format(day)}</span>
+            <span class="time-day-num">${day.getDate()}</span>
             ${this.renderDayWeather(day)}
-            <span class="week-day-count">${dayEvents.length}</span>
-          </header>
-          <div class="week-day-events">
-            ${dayEvents.length
-              ? dayEvents.map((event) => this.renderEventItem(event, true))
-              : html`<div class="empty-day">${this.t("no_events")}</div>`}
-          </div>
-        </section>`;
-      })}
+          </div>`;
+        })}
+      </div>
+      ${hasAllDay
+        ? html`<div class="time-grid-allday">
+            <div class="time-gutter"></div>
+            ${allDayPerDay.map(
+              (list) => html`<div class="time-allday-cell">
+                ${list.map(
+                  (event) => html`<button
+                    class="cell-event"
+                    style=${`--event-color:${event.calendarColor}`}
+                    title=${event.title}
+                    @click=${() => (this.selectedEvent = event)}
+                  >
+                    <span class="cell-dot"></span>${event.title}
+                  </button>`
+                )}
+              </div>`
+            )}
+          </div>`
+        : nothing}
+      <div class="time-grid-body">
+        <div class="time-gutter-col">
+          ${hours.map((hour) => html`<div class="time-hour-label">${formatHour(hour)}</div>`)}
+        </div>
+        ${days.map((day, dayIndex) => {
+          const isToday = day.toDateString() === todayKey;
+          return html`<div class="time-day-col ${isToday ? "today" : ""}">
+            ${hours.map(() => html`<div class="time-hour-cell"></div>`)}
+            ${this.layoutTimeGridEvents(timedPerDay[dayIndex], gridStart, gridEnd).map(
+              ({ event, top, height, left, width }) => html`<button
+                class="time-event ${event.completed ? "completed" : ""}"
+                style=${`--event-color:${event.calendarColor};top:${top}%;height:${height}%;left:${left}%;width:${width}%`}
+                title=${event.title}
+                @click=${() => (this.selectedEvent = event)}
+              >
+                <span class="time-event-title">${event.title}</span>
+                <span class="time-event-time">${this.formatDateTime(event.start).split(", ").pop()}</span>
+                <span class="time-event-badge" style=${`background:${event.calendarColor}`}
+                  >${event.calendarName.charAt(0).toUpperCase()}</span
+                >
+              </button>`
+            )}
+            ${isToday ? this.renderNowLine(gridStart, gridEnd) : nothing}
+          </div>`;
+        })}
+      </div>
     </div>`;
   }
 
@@ -564,7 +725,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
     if (this.activeSection === "tasks") return this.renderTasksPanel();
     if (this.activeSection === "meals") return this.renderMealsPanel();
     if (this.currentView === "month") return this.renderMonthGrid();
-    if ((this.currentView === "week" || this.currentView === "work_week") && this.config?.show_empty_days !== false) {
+    if (this.currentView === "week" || this.currentView === "work_week") {
       return this.renderWeekGrid();
     }
 
@@ -772,6 +933,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       --fhc-month-cell-h: 92px;
       --fhc-chip-min-h: 20px;
       --fhc-chip-pad: 3px 6px;
+      --fhc-hour-h: 44px;
     }
     .hub.density-comfortable {
       --fhc-event-min-h: 56px;
@@ -780,6 +942,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       --fhc-month-cell-h: 108px;
       --fhc-chip-min-h: 24px;
       --fhc-chip-pad: 4px 7px;
+      --fhc-hour-h: 56px;
     }
     .hub.density-large {
       --fhc-event-min-h: 76px;
@@ -788,6 +951,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       --fhc-month-cell-h: 136px;
       --fhc-chip-min-h: 32px;
       --fhc-chip-pad: 6px 10px;
+      --fhc-hour-h: 72px;
     }
     .hub.density-extra_large {
       --fhc-event-min-h: 96px;
@@ -796,6 +960,7 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       --fhc-month-cell-h: 168px;
       --fhc-chip-min-h: 40px;
       --fhc-chip-pad: 8px 14px;
+      --fhc-hour-h: 88px;
     }
     .layout {
       display: flex;
@@ -1283,6 +1448,177 @@ export class FamilyHubCalendarCard extends LitElement implements LovelaceCard {
       opacity: 0.55;
       font-size: 0.85em;
       padding: 6px 2px;
+    }
+    .time-grid {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .time-grid-header {
+      display: flex;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      background: color-mix(in srgb, var(--fhc-accent, var(--primary-color)) 5%, transparent);
+    }
+    .time-gutter {
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .time-day-header {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      justify-items: center;
+      gap: 2px;
+      padding: 8px 4px;
+      cursor: pointer;
+      font-size: 0.8em;
+      font-weight: 700;
+      text-transform: capitalize;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-day-name {
+      opacity: 0.6;
+      font-size: 0.85em;
+    }
+    .time-day-num {
+      font-size: 1.15rem;
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+    }
+    .time-day-header.today .time-day-num {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+    }
+    .time-grid-allday {
+      display: flex;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+      padding: 4px 0;
+    }
+    .time-allday-cell {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      padding: 2px 4px;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-grid-body {
+      display: flex;
+      overflow-y: auto;
+      max-height: min(70vh, 640px);
+    }
+    .time-gutter-col {
+      width: 56px;
+      flex-shrink: 0;
+    }
+    .time-hour-label {
+      height: var(--fhc-hour-h, 56px);
+      box-sizing: border-box;
+      padding: 2px 8px 0 0;
+      text-align: right;
+      font-size: 0.7em;
+      font-weight: 600;
+      opacity: 0.5;
+      transform: translateY(-0.6em);
+    }
+    .time-day-col {
+      flex: 1;
+      min-width: 0;
+      position: relative;
+      border-left: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-day-col.today {
+      background: var(--fhc-accent-soft);
+    }
+    .time-hour-cell {
+      height: var(--fhc-hour-h, 56px);
+      box-sizing: border-box;
+      border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.1));
+    }
+    .time-hour-cell:first-child {
+      border-top: none;
+    }
+    .time-event {
+      position: absolute;
+      display: grid;
+      align-content: start;
+      gap: 1px;
+      margin: 0 2px;
+      padding: 3px 6px;
+      border: none;
+      border-radius: 8px;
+      border-left: 3px solid var(--event-color, var(--fhc-accent));
+      background: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 32%, white);
+      color: color-mix(in srgb, var(--event-color, var(--fhc-accent)) 65%, #10131a);
+      text-align: left;
+      font: inherit;
+      font-size: var(--fhc-event-font, 0.78em);
+      overflow: hidden;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      transition: transform 120ms ease, box-shadow 120ms ease, z-index 0ms;
+      z-index: 1;
+    }
+    .time-event:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+      z-index: 2;
+    }
+    .time-event.completed {
+      opacity: 0.6;
+      text-decoration: line-through;
+    }
+    .time-event-title {
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .time-event-time {
+      font-size: 0.85em;
+      opacity: 0.8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .time-event-badge {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.62em;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8);
+    }
+    .time-now-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #ef4444;
+      z-index: 3;
+    }
+    .time-now-line::before {
+      content: "";
+      position: absolute;
+      left: -4px;
+      top: -3px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
     }
     .event {
       width: 100%;
