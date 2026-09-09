@@ -42,7 +42,7 @@ export interface FamilyHubCalendarConfig {
   show_weather?: boolean;
   show_tasks?: boolean;
   show_meals?: boolean;
-  event_density?: "comfortable" | "compact";
+  event_density?: "compact" | "comfortable" | "large" | "extra_large";
   compact_mode?: boolean;
   border_radius?: number;
   show_empty_days?: boolean;
