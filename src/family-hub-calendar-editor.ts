@@ -94,7 +94,7 @@ const LABELS: Record<string, string> = {
   show_meals: "Show meals",
   compact_mode: "Compact mode",
   grouped_by_calendar: "Group events by calendar",
-  show_empty_days: "Show full week/month grid (even empty days)",
+  show_empty_days: "Show adjacent month days in month grid",
   layout_orientation: "Default layout orientation"
 };
 
