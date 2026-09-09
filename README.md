@@ -25,15 +25,17 @@ FamilyHubCalendarCard (LitElement)
 
 - `family-hub-calendar` (main card)
   - navigation + animated view switching
+  - true calendar-grid month view (full weeks, adjacent-month days, "+N more" overflow)
+  - week/work-week grid showing every day (with a "no events" placeholder) or a compact agenda list
   - merged or grouped calendars
   - event modal (details, copy, edit/delete service hooks, map launch)
   - tasks, meals, weather sections
 - `family-hub-calendar-editor` (visual editor)
   - Fully configurable through the Lovelace UI — no YAML required
-  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, section toggles, weather entity/placement, and task/meal entities
-  - Calendar picker (`ha-entity-picker`, filtered to `calendar.*`) with per-calendar name, color, and enabled toggle
-  - Family member list editor (name, avatar, color) for assignment color-coding
-  - Theme color fields (background/surface/text/accent), accepting hex values or CSS variables
+  - Native `ha-form` powered fields for title, default/enabled views, language, week start, time format, font, border radius, event density, section toggles (including "show empty days"), weather entity/placement, and task/meal entities
+  - Calendar picker (`ha-entity-picker`, filtered to `calendar.*`) with per-calendar name, color picker (native swatch + quick palette), and enabled toggle
+  - Family member list editor (name, avatar, color picker) for assignment color-coding
+  - Theme preset selector (Home Assistant auto, Midnight, Light, Sunset, Forest, Ocean, or Custom) plus individual color fields/pickers (background/surface/text/accent), accepting hex values or CSS variables
 
 ## 3) Data Model
 
@@ -88,6 +90,8 @@ show_weather: true
 event_density: comfortable
 compact_mode: false
 border_radius: 16
+show_empty_days: true # render full week/month grids even for days without events
+theme_preset: auto # auto | midnight | light | sunset | forest | ocean | custom
 
 theme_colors:
   background: "#0f172a"

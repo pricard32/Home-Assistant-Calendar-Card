@@ -28,5 +28,6 @@
   "tasks": "Tasks",
   "meals": "Meals",
   "daily_summary": "Daily Summary",
-  "no_events": "No events in range"
+  "no_events": "No events in range",
+  "more": "more"
 }

@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { normalizeConfig } from "./config";
+import { normalizeConfig, THEME_PRESETS } from "./config";
 import type {
   CalendarSourceConfig,
   FamilyHubCalendarConfig,
@@ -63,6 +63,8 @@ const WEATHER_PLACEMENT_OPTIONS: SelectOption[] = [
   { value: "agenda", label: "Agenda" }
 ];
 
+const PALETTE = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "#26A69A", "#EF4444", "#FBBF24"];
+
 const LABELS: Record<string, string> = {
   title: "Title",
   default_view: "Default view",
@@ -84,7 +86,8 @@ const LABELS: Record<string, string> = {
   show_tasks: "Show tasks",
   show_meals: "Show meals",
   compact_mode: "Compact mode",
-  grouped_by_calendar: "Group events by calendar"
+  grouped_by_calendar: "Group events by calendar",
+  show_empty_days: "Show full week/month grid (even empty days)"
 };
 
 const MAIN_SCHEMA = [
@@ -120,7 +123,8 @@ const MAIN_SCHEMA = [
       { name: "show_tasks", selector: { boolean: {} } },
       { name: "show_meals", selector: { boolean: {} } },
       { name: "compact_mode", selector: { boolean: {} } },
-      { name: "grouped_by_calendar", selector: { boolean: {} } }
+      { name: "grouped_by_calendar", selector: { boolean: {} } },
+      { name: "show_empty_days", selector: { boolean: {} } }
     ]
   },
   {
@@ -228,6 +232,24 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
     this.updateValue("calendars", calendars);
   }
 
+  // --- Shared color picker -----------------------------------------------
+
+  private renderColorField(value: string, onChange: (color: string) => void) {
+    return html`<div class="color-field">
+      <input type="color" class="swatch" .value=${value || "#4F86F7"} @input=${(e: Event) => onChange((e.target as HTMLInputElement).value)} />
+      <div class="palette">
+        ${PALETTE.map(
+          (color) => html`<button
+            class="palette-swatch ${color.toLowerCase() === (value || "").toLowerCase() ? "selected" : ""}"
+            style=${`background:${color}`}
+            title=${color}
+            @click=${() => onChange(color)}
+          ></button>`
+        )}
+      </div>
+    </div>`;
+  }
+
   private renderCalendarsSection() {
     if (!this.config) return nothing;
     return html`<div class="section">
@@ -235,12 +257,6 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
       <p class="hint">Choose which calendar entities appear on the card, and customize their name and color.</p>
       ${this.config.calendars.map(
         (calendar, index) => html`<div class="row calendar-row">
-          <input
-            type="color"
-            class="swatch"
-            .value=${calendar.color || "#4F86F7"}
-            @input=${(e: Event) => this.updateCalendar(index, { color: (e.target as HTMLInputElement).value })}
-          />
           <div class="row-main">
             <span class="entity-id">${calendar.entity}</span>
             <input
@@ -249,6 +265,7 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
               .value=${calendar.name || ""}
               @input=${(e: Event) => this.updateCalendar(index, { name: (e.target as HTMLInputElement).value })}
             />
+            ${this.renderColorField(calendar.color || "#4F86F7", (color) => this.updateCalendar(index, { color }))}
           </div>
           <label class="enabled-toggle">
             <input
@@ -300,12 +317,6 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
       <p class="hint">Add household members to color-code assigned events and tasks.</p>
       ${members.map(
         (member, index) => html`<div class="row member-row">
-          <input
-            type="color"
-            class="swatch"
-            .value=${member.color || "#60a5fa"}
-            @input=${(e: Event) => this.updateFamilyMember(index, { color: (e.target as HTMLInputElement).value })}
-          />
           <div class="row-main">
             <input
               type="text"
@@ -319,6 +330,7 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
               .value=${member.avatar || ""}
               @input=${(e: Event) => this.updateFamilyMember(index, { avatar: (e.target as HTMLInputElement).value })}
             />
+            ${this.renderColorField(member.color || "#60a5fa", (color) => this.updateFamilyMember(index, { color }))}
           </div>
           <button class="icon-btn" title="Remove" @click=${() => this.removeFamilyMember(index)}>✕</button>
         </div>`
@@ -334,12 +346,42 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
     this.updateValue("theme_colors", { ...this.config.theme_colors, [key]: value });
   }
 
+  private applyThemePreset(presetId: string): void {
+    if (!this.config) return;
+    const preset = THEME_PRESETS.find((entry) => entry.id === presetId);
+    if (!preset) return;
+    this.config = { ...this.config, theme_preset: presetId, theme_colors: { ...preset.colors } };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this.config },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+
   private renderThemeSection() {
     if (!this.config) return nothing;
     const colors = this.config.theme_colors ?? {};
+    const activePreset = this.config.theme_preset ?? "custom";
     return html`<div class="section">
-      <h3>Theme colors</h3>
-      <p class="hint">Accepts hex colors or CSS variables (e.g. var(--primary-color)).</p>
+      <h3>Theme</h3>
+      <p class="hint">Pick a starter theme, then fine-tune individual colors below.</p>
+      <select
+        class="theme-select"
+        .value=${activePreset}
+        @change=${(e: Event) => {
+          const value = (e.target as HTMLSelectElement).value;
+          if (value === "custom") {
+            this.updateValue("theme_preset", "custom");
+          } else {
+            this.applyThemePreset(value);
+          }
+        }}
+      >
+        ${THEME_PRESETS.map((preset) => html`<option value=${preset.id}>${preset.label}</option>`)}
+        <option value="custom">Custom</option>
+      </select>
       <div class="theme-grid">
         ${THEME_FIELDS.map(
           (field) => html`<label class="theme-field">
@@ -347,8 +389,15 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
             <input
               type="text"
               .value=${colors[field.key] || ""}
-              @input=${(e: Event) => this.updateThemeColor(field.key, (e.target as HTMLInputElement).value)}
+              @input=${(e: Event) => {
+                this.updateValue("theme_preset", "custom");
+                this.updateThemeColor(field.key, (e.target as HTMLInputElement).value);
+              }}
             />
+            ${this.renderColorField(colors[field.key] || "#60a5fa", (color) => {
+              this.updateValue("theme_preset", "custom");
+              this.updateThemeColor(field.key, color);
+            })}
           </label>`
         )}
       </div>
@@ -516,6 +565,36 @@ export class FamilyHubCalendarEditor extends LitElement implements LovelaceCardE
       display: grid;
       gap: 4px;
       font-size: 0.85em;
+    }
+    .theme-select {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, #374151);
+      background: var(--card-background-color, transparent);
+      color: inherit;
+      justify-self: start;
+    }
+    .color-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .palette {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .palette-swatch {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      padding: 0;
+    }
+    .palette-swatch.selected {
+      border-color: var(--primary-text-color, #111827);
     }
   `;
 }

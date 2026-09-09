@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dateRangeForView, normalizeConfig } from "../src/config";
+import { dateRangeForView, gridDaysForView, monthGridDays, normalizeConfig } from "../src/config";
 import { detectLanguage, localize } from "../src/localize";
 
 describe("normalizeConfig", () => {
@@ -31,6 +31,45 @@ describe("dateRangeForView", () => {
 
     expect([range.start.getFullYear(), range.start.getMonth(), range.start.getDate()]).toEqual([2026, 8, 7]);
     expect([range.end.getFullYear(), range.end.getMonth(), range.end.getDate()]).toEqual([2026, 8, 11]);
+  });
+});
+
+describe("monthGridDays", () => {
+  it("fills complete weeks aligned to the configured week start", () => {
+    const date = new Date("2026-09-09T12:00:00Z");
+    const days = monthGridDays(date, 1, true);
+
+    expect(days.length % 7).toBe(0);
+    expect(days[0].getDay()).toBe(1);
+    expect(days[days.length - 1].getDay()).toBe(0);
+    expect(days.some((day) => day.getMonth() === 8 && day.getDate() === 1)).toBe(true);
+    expect(days.some((day) => day.getMonth() === 8 && day.getDate() === 30)).toBe(true);
+  });
+
+  it("excludes adjacent-month days when includeAdjacentMonths is false", () => {
+    const date = new Date("2026-09-09T12:00:00Z");
+    const days = monthGridDays(date, 1, false);
+
+    expect(days.every((day) => day.getMonth() === 8)).toBe(true);
+    expect(days.length).toBe(30);
+  });
+});
+
+describe("gridDaysForView", () => {
+  it("returns one Date per day for a week view", () => {
+    const date = new Date("2026-09-09T12:00:00Z");
+    const days = gridDaysForView(date, "week", 1);
+
+    expect(days).toHaveLength(7);
+    expect(days[0].getDay()).toBe(1);
+    expect(days[6].getDay()).toBe(0);
+  });
+
+  it("returns 5 days for a work week view", () => {
+    const date = new Date("2026-09-09T12:00:00Z");
+    const days = gridDaysForView(date, "work_week", 1);
+
+    expect(days).toHaveLength(5);
   });
 });
 

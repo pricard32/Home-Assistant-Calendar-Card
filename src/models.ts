@@ -174,6 +174,14 @@ export const extractMeals = (hass: HomeAssistant, mealEntities: string[] = []): 
 export const sortEvents = (events: HubEvent[]): HubEvent[] =>
   [...events].sort((a, b) => a.start.getTime() - b.start.getTime());
 
+export const eventsOnDay = (events: HubEvent[], day: Date): HubEvent[] => {
+  const dayStart = new Date(day);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(day);
+  dayEnd.setHours(23, 59, 59, 999);
+  return events.filter((event) => event.end >= dayStart && event.start <= dayEnd);
+};
+
 export const eventDuration = (event: HubEvent): string => {
   const minutes = Math.max(0, Math.round((event.end.getTime() - event.start.getTime()) / 60000));
   const hours = Math.floor(minutes / 60);

@@ -735,7 +735,7 @@ var init_decorators = __esm({
 });
 
 // src/config.ts
-var DEFAULT_VIEWS, DEFAULT_CONFIG, normalizeConfig, dateRangeForView;
+var DEFAULT_VIEWS, DEFAULT_CONFIG, normalizeConfig, THEME_PRESETS, monthGridDays, gridDaysForView, dateRangeForView;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
@@ -765,6 +765,8 @@ var init_config = __esm({
       event_density: "comfortable",
       compact_mode: false,
       border_radius: 16,
+      show_empty_days: true,
+      theme_preset: "auto",
       theme_colors: {
         background: "var(--ha-card-background, #111827)",
         surface: "var(--card-background-color, #1f2937)",
@@ -786,6 +788,79 @@ var init_config = __esm({
           enabled: calendar.enabled !== false
         }))
       };
+    };
+    THEME_PRESETS = [
+      {
+        id: "auto",
+        label: "Home Assistant (auto)",
+        colors: {
+          background: "var(--ha-card-background, var(--card-background-color))",
+          surface: "var(--card-background-color, #1f2937)",
+          text: "var(--primary-text-color)",
+          accent: "var(--primary-color)"
+        }
+      },
+      {
+        id: "midnight",
+        label: "Midnight",
+        colors: { background: "#0f172a", surface: "#1e293b", text: "#f8fafc", accent: "#60a5fa" }
+      },
+      {
+        id: "light",
+        label: "Light",
+        colors: { background: "#ffffff", surface: "#f3f4f6", text: "#111827", accent: "#2563eb" }
+      },
+      {
+        id: "sunset",
+        label: "Sunset",
+        colors: { background: "#1a1025", surface: "#2d1b3d", text: "#fde8ff", accent: "#fb7185" }
+      },
+      {
+        id: "forest",
+        label: "Forest",
+        colors: { background: "#0f1f17", surface: "#173328", text: "#e6f4ea", accent: "#34d399" }
+      },
+      {
+        id: "ocean",
+        label: "Ocean",
+        colors: { background: "#071a2b", surface: "#0f2a44", text: "#e0f2fe", accent: "#38bdf8" }
+      }
+    ];
+    monthGridDays = (selectedDate, weekStartDay, includeAdjacentMonths = true) => {
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      const firstOfMonth = new Date(year, month, 1);
+      const lastOfMonth = new Date(year, month + 1, 0);
+      const diffToStart = (firstOfMonth.getDay() - weekStartDay + 7) % 7;
+      const gridStart = new Date(firstOfMonth);
+      gridStart.setDate(firstOfMonth.getDate() - diffToStart);
+      const weekEndDay = (weekStartDay + 6) % 7;
+      const diffToEnd = (weekEndDay - lastOfMonth.getDay() + 7) % 7;
+      const gridEnd = new Date(lastOfMonth);
+      gridEnd.setDate(lastOfMonth.getDate() + diffToEnd);
+      const days = [];
+      const cursor = new Date(gridStart);
+      cursor.setHours(0, 0, 0, 0);
+      const last = new Date(gridEnd);
+      last.setHours(0, 0, 0, 0);
+      while (cursor <= last) {
+        days.push(new Date(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return includeAdjacentMonths ? days : days.filter((day) => day.getMonth() === month);
+    };
+    gridDaysForView = (selectedDate, view, weekStartDay) => {
+      const { start, end } = dateRangeForView(selectedDate, view, weekStartDay);
+      const days = [];
+      const cursor = new Date(start);
+      cursor.setHours(0, 0, 0, 0);
+      const last = new Date(end);
+      last.setHours(0, 0, 0, 0);
+      while (cursor <= last) {
+        days.push(new Date(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return days;
     };
     dateRangeForView = (selectedDate, view, weekStartDay) => {
       const start = new Date(selectedDate);
@@ -826,7 +901,7 @@ var family_hub_calendar_editor_exports = {};
 __export(family_hub_calendar_editor_exports, {
   FamilyHubCalendarEditor: () => FamilyHubCalendarEditor
 });
-var VIEW_OPTIONS, LANGUAGE_OPTIONS, WEEK_START_OPTIONS, TIME_FORMAT_OPTIONS, FONT_SIZE_OPTIONS, DENSITY_OPTIONS, WEATHER_PLACEMENT_OPTIONS, LABELS, MAIN_SCHEMA, THEME_FIELDS, familyMemberCounter, FamilyHubCalendarEditor;
+var VIEW_OPTIONS, LANGUAGE_OPTIONS, WEEK_START_OPTIONS, TIME_FORMAT_OPTIONS, FONT_SIZE_OPTIONS, DENSITY_OPTIONS, WEATHER_PLACEMENT_OPTIONS, PALETTE, LABELS, MAIN_SCHEMA, THEME_FIELDS, familyMemberCounter, FamilyHubCalendarEditor;
 var init_family_hub_calendar_editor = __esm({
   "src/family-hub-calendar-editor.ts"() {
     "use strict";
@@ -869,6 +944,7 @@ var init_family_hub_calendar_editor = __esm({
       { value: "day_cell", label: "Day cell" },
       { value: "agenda", label: "Agenda" }
     ];
+    PALETTE = ["#4F86F7", "#4CAF50", "#FF9800", "#7E57C2", "#F06292", "#26A69A", "#EF4444", "#FBBF24"];
     LABELS = {
       title: "Title",
       default_view: "Default view",
@@ -890,7 +966,8 @@ var init_family_hub_calendar_editor = __esm({
       show_tasks: "Show tasks",
       show_meals: "Show meals",
       compact_mode: "Compact mode",
-      grouped_by_calendar: "Group events by calendar"
+      grouped_by_calendar: "Group events by calendar",
+      show_empty_days: "Show full week/month grid (even empty days)"
     };
     MAIN_SCHEMA = [
       { name: "title", selector: { text: {} } },
@@ -925,7 +1002,8 @@ var init_family_hub_calendar_editor = __esm({
           { name: "show_tasks", selector: { boolean: {} } },
           { name: "show_meals", selector: { boolean: {} } },
           { name: "compact_mode", selector: { boolean: {} } },
-          { name: "grouped_by_calendar", selector: { boolean: {} } }
+          { name: "grouped_by_calendar", selector: { boolean: {} } },
+          { name: "show_empty_days", selector: { boolean: {} } }
         ]
       },
       {
@@ -1019,6 +1097,22 @@ var init_family_hub_calendar_editor = __esm({
         const calendars = this.config.calendars.filter((_2, i5) => i5 !== index);
         this.updateValue("calendars", calendars);
       }
+      // --- Shared color picker -----------------------------------------------
+      renderColorField(value, onChange) {
+        return b2`<div class="color-field">
+      <input type="color" class="swatch" .value=${value || "#4F86F7"} @input=${(e5) => onChange(e5.target.value)} />
+      <div class="palette">
+        ${PALETTE.map(
+          (color) => b2`<button
+            class="palette-swatch ${color.toLowerCase() === (value || "").toLowerCase() ? "selected" : ""}"
+            style=${`background:${color}`}
+            title=${color}
+            @click=${() => onChange(color)}
+          ></button>`
+        )}
+      </div>
+    </div>`;
+      }
       renderCalendarsSection() {
         if (!this.config) return A;
         return b2`<div class="section">
@@ -1026,12 +1120,6 @@ var init_family_hub_calendar_editor = __esm({
       <p class="hint">Choose which calendar entities appear on the card, and customize their name and color.</p>
       ${this.config.calendars.map(
           (calendar, index) => b2`<div class="row calendar-row">
-          <input
-            type="color"
-            class="swatch"
-            .value=${calendar.color || "#4F86F7"}
-            @input=${(e5) => this.updateCalendar(index, { color: e5.target.value })}
-          />
           <div class="row-main">
             <span class="entity-id">${calendar.entity}</span>
             <input
@@ -1040,6 +1128,7 @@ var init_family_hub_calendar_editor = __esm({
               .value=${calendar.name || ""}
               @input=${(e5) => this.updateCalendar(index, { name: e5.target.value })}
             />
+            ${this.renderColorField(calendar.color || "#4F86F7", (color) => this.updateCalendar(index, { color }))}
           </div>
           <label class="enabled-toggle">
             <input
@@ -1089,12 +1178,6 @@ var init_family_hub_calendar_editor = __esm({
       <p class="hint">Add household members to color-code assigned events and tasks.</p>
       ${members.map(
           (member, index) => b2`<div class="row member-row">
-          <input
-            type="color"
-            class="swatch"
-            .value=${member.color || "#60a5fa"}
-            @input=${(e5) => this.updateFamilyMember(index, { color: e5.target.value })}
-          />
           <div class="row-main">
             <input
               type="text"
@@ -1108,6 +1191,7 @@ var init_family_hub_calendar_editor = __esm({
               .value=${member.avatar || ""}
               @input=${(e5) => this.updateFamilyMember(index, { avatar: e5.target.value })}
             />
+            ${this.renderColorField(member.color || "#60a5fa", (color) => this.updateFamilyMember(index, { color }))}
           </div>
           <button class="icon-btn" title="Remove" @click=${() => this.removeFamilyMember(index)}>✕</button>
         </div>`
@@ -1120,12 +1204,41 @@ var init_family_hub_calendar_editor = __esm({
         if (!this.config) return;
         this.updateValue("theme_colors", { ...this.config.theme_colors, [key]: value });
       }
+      applyThemePreset(presetId) {
+        if (!this.config) return;
+        const preset = THEME_PRESETS.find((entry) => entry.id === presetId);
+        if (!preset) return;
+        this.config = { ...this.config, theme_preset: presetId, theme_colors: { ...preset.colors } };
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: this.config },
+            bubbles: true,
+            composed: true
+          })
+        );
+      }
       renderThemeSection() {
         if (!this.config) return A;
         const colors = this.config.theme_colors ?? {};
+        const activePreset = this.config.theme_preset ?? "custom";
         return b2`<div class="section">
-      <h3>Theme colors</h3>
-      <p class="hint">Accepts hex colors or CSS variables (e.g. var(--primary-color)).</p>
+      <h3>Theme</h3>
+      <p class="hint">Pick a starter theme, then fine-tune individual colors below.</p>
+      <select
+        class="theme-select"
+        .value=${activePreset}
+        @change=${(e5) => {
+          const value = e5.target.value;
+          if (value === "custom") {
+            this.updateValue("theme_preset", "custom");
+          } else {
+            this.applyThemePreset(value);
+          }
+        }}
+      >
+        ${THEME_PRESETS.map((preset) => b2`<option value=${preset.id}>${preset.label}</option>`)}
+        <option value="custom">Custom</option>
+      </select>
       <div class="theme-grid">
         ${THEME_FIELDS.map(
           (field) => b2`<label class="theme-field">
@@ -1133,8 +1246,15 @@ var init_family_hub_calendar_editor = __esm({
             <input
               type="text"
               .value=${colors[field.key] || ""}
-              @input=${(e5) => this.updateThemeColor(field.key, e5.target.value)}
+              @input=${(e5) => {
+            this.updateValue("theme_preset", "custom");
+            this.updateThemeColor(field.key, e5.target.value);
+          }}
             />
+            ${this.renderColorField(colors[field.key] || "#60a5fa", (color) => {
+            this.updateValue("theme_preset", "custom");
+            this.updateThemeColor(field.key, color);
+          })}
           </label>`
         )}
       </div>
@@ -1292,6 +1412,36 @@ var init_family_hub_calendar_editor = __esm({
       gap: 4px;
       font-size: 0.85em;
     }
+    .theme-select {
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--divider-color, #374151);
+      background: var(--card-background-color, transparent);
+      color: inherit;
+      justify-self: start;
+    }
+    .color-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .palette {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .palette-swatch {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      padding: 0;
+    }
+    .palette-swatch.selected {
+      border-color: var(--primary-text-color, #111827);
+    }
   `;
     __decorateClass([
       n4({ attribute: false })
@@ -1344,7 +1494,8 @@ var en_default = {
   tasks: "Tasks",
   meals: "Meals",
   daily_summary: "Daily Summary",
-  no_events: "No events in range"
+  no_events: "No events in range",
+  more: "more"
 };
 
 // src/translations/fr.json
@@ -1378,7 +1529,8 @@ var fr_default = {
   tasks: "T\xE2ches",
   meals: "Repas",
   daily_summary: "R\xE9sum\xE9 du jour",
-  no_events: "Aucun \xE9v\xE9nement sur cette p\xE9riode"
+  no_events: "Aucun \xE9v\xE9nement sur cette p\xE9riode",
+  more: "de plus"
 };
 
 // src/localize.ts
@@ -1509,6 +1661,13 @@ var extractMeals = (hass, mealEntities = []) => {
   return meals;
 };
 var sortEvents = (events) => [...events].sort((a3, b3) => a3.start.getTime() - b3.start.getTime());
+var eventsOnDay = (events, day) => {
+  const dayStart = new Date(day);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(day);
+  dayEnd.setHours(23, 59, 59, 999);
+  return events.filter((event) => event.end >= dayStart && event.start <= dayEnd);
+};
 var eventDuration = (event) => {
   const minutes = Math.max(0, Math.round((event.end.getTime() - event.start.getTime()) / 6e4));
   const hours = Math.floor(minutes / 60);
@@ -1739,6 +1898,81 @@ var FamilyHubCalendarCard = class extends i4 {
     )}
     </div>`;
   }
+  jumpToDay(day) {
+    this.currentDate = new Date(day);
+    if (this.config?.enabled_views?.includes("day")) this.currentView = "day";
+  }
+  renderMonthGrid() {
+    if (!this.config) return A;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const includeAdjacent = this.config.show_empty_days !== false;
+    const days = monthGridDays(this.currentDate, weekStartDay, includeAdjacent);
+    const events = this.allEvents();
+    const weeks = [];
+    for (let i5 = 0; i5 < days.length; i5 += 7) weeks.push(days.slice(i5, i5 + 7));
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    const weekdayLabels = days.slice(0, 7).map((day) => new Intl.DateTimeFormat(locale, { weekday: "short" }).format(day));
+    const todayKey = (/* @__PURE__ */ new Date()).toDateString();
+    const currentMonth = this.currentDate.getMonth();
+    return b2`<div class="month-grid">
+      <div class="month-grid-header">${weekdayLabels.map((label) => b2`<span>${label}</span>`)}</div>
+      ${weeks.map(
+      (week) => b2`<div class="month-grid-row">
+          ${week.map((day) => {
+        const dayEvents = eventsOnDay(events, day);
+        const isOutside = day.getMonth() !== currentMonth;
+        const isToday = day.toDateString() === todayKey;
+        const visible = dayEvents.slice(0, 3);
+        const extra = dayEvents.length - visible.length;
+        return b2`<div class="month-cell ${isOutside ? "outside" : ""} ${isToday ? "today" : ""}">
+              <button class="month-cell-date" @click=${() => this.jumpToDay(day)}>${day.getDate()}</button>
+              <div class="month-cell-events">
+                ${visible.map(
+          (event) => b2`<button
+                    class="cell-event"
+                    style=${`--event-color:${event.calendarColor}`}
+                    title=${event.title}
+                    @click=${(e5) => {
+            e5.stopPropagation();
+            this.selectedEvent = event;
+          }}
+                  >
+                    <span class="cell-dot"></span>${event.title}
+                  </button>`
+        )}
+                ${extra > 0 ? b2`<span class="cell-more">+${extra} ${this.t("more")}</span>` : A}
+              </div>
+            </div>`;
+      })}
+        </div>`
+    )}
+    </div>`;
+  }
+  renderWeekGrid() {
+    if (!this.config) return A;
+    const weekStartDay = this.config.week_start_day ?? 1;
+    const days = gridDaysForView(this.currentDate, this.currentView, weekStartDay);
+    const events = this.allEvents();
+    const todayKey = (/* @__PURE__ */ new Date()).toDateString();
+    const locale = this.activeLanguage === "fr" ? "fr-FR" : "en-US";
+    return b2`<div class="week-grid">
+      ${days.map((day) => {
+      const dayEvents = eventsOnDay(events, day);
+      const isToday = day.toDateString() === todayKey;
+      return b2`<section class="week-day ${isToday ? "today" : ""}">
+          <header class="week-day-header">
+            <span class="week-day-name">
+              ${new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" }).format(day)}
+            </span>
+            <span class="week-day-count">${dayEvents.length}</span>
+          </header>
+          <div class="week-day-events">
+            ${dayEvents.length ? dayEvents.map((event) => this.renderEventItem(event)) : b2`<div class="empty-day">${this.t("no_events")}</div>`}
+          </div>
+        </section>`;
+    })}
+    </div>`;
+  }
   renderEventItem(event) {
     const isToday = (/* @__PURE__ */ new Date()).toDateString() === event.start.toDateString();
     return b2`<button
@@ -1758,6 +1992,10 @@ var FamilyHubCalendarCard = class extends i4 {
     </button>`;
   }
   renderEvents() {
+    if (this.currentView === "month") return this.renderMonthGrid();
+    if ((this.currentView === "week" || this.currentView === "work_week") && this.config?.show_empty_days !== false) {
+      return this.renderWeekGrid();
+    }
     const events = this.visibleEvents();
     if (!events.length)
       return b2`<div class="empty">
@@ -2094,6 +2332,133 @@ FamilyHubCalendarCard.styles = i`
     .group {
       display: grid;
       gap: 6px;
+    }
+    .month-grid {
+      display: grid;
+      gap: 4px;
+    }
+    .month-grid-header {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      font-size: 0.75em;
+      font-weight: 600;
+      opacity: 0.6;
+      text-transform: uppercase;
+      text-align: center;
+      padding-bottom: 4px;
+    }
+    .month-grid-row {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .month-cell {
+      min-height: 84px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 10px;
+      padding: 4px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 2px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .month-cell.outside {
+      opacity: 0.4;
+    }
+    .month-cell.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+      box-shadow: inset 0 0 0 1px var(--fhc-accent, var(--primary-color));
+    }
+    .month-cell-date {
+      justify-self: end;
+      border: none;
+      background: transparent;
+      color: inherit;
+      font-weight: 600;
+      font-size: 0.85em;
+      cursor: pointer;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+    }
+    .month-cell.today .month-cell-date {
+      background: var(--fhc-accent, var(--primary-color));
+      color: #fff;
+    }
+    .month-cell-events {
+      display: grid;
+      gap: 2px;
+      align-content: start;
+      overflow: hidden;
+    }
+    .cell-event {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      font-size: 0.72em;
+      padding: 1px 2px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell-event:hover {
+      background: var(--fhc-accent-soft);
+    }
+    .cell-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--event-color, var(--fhc-accent));
+      flex-shrink: 0;
+    }
+    .cell-more {
+      font-size: 0.7em;
+      opacity: 0.6;
+      padding: 0 2px;
+    }
+    .week-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .week-day {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+      border-radius: 12px;
+      padding: 10px;
+      background: var(--fhc-surface, color-mix(in srgb, currentColor 3%, transparent));
+    }
+    .week-day.today {
+      border-color: var(--fhc-accent, var(--primary-color));
+    }
+    .week-day-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 0.85em;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .week-day-count {
+      opacity: 0.6;
+      font-weight: 500;
+    }
+    .week-day-events {
+      display: grid;
+      gap: 6px;
+    }
+    .empty-day {
+      opacity: 0.55;
+      font-size: 0.85em;
+      padding: 6px 2px;
     }
     .event {
       width: 100%;

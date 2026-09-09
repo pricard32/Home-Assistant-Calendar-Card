@@ -27,6 +27,8 @@ export const DEFAULT_CONFIG: Omit<FamilyHubCalendarConfig, "type" | "calendars">
   event_density: "comfortable",
   compact_mode: false,
   border_radius: 16,
+  show_empty_days: true,
+  theme_preset: "auto",
   theme_colors: {
     background: "var(--ha-card-background, #111827)",
     surface: "var(--card-background-color, #1f2937)",
@@ -54,6 +56,103 @@ export const normalizeConfig = (config: FamilyHubCalendarConfig): FamilyHubCalen
 
 export const detectDefaultCalendars = (hass: HomeAssistant): string[] =>
   Object.keys(hass.states).filter((entityId) => entityId.startsWith("calendar."));
+
+export interface ThemePreset {
+  id: string;
+  label: string;
+  colors: NonNullable<FamilyHubCalendarConfig["theme_colors"]>;
+}
+
+export const THEME_PRESETS: ThemePreset[] = [
+  {
+    id: "auto",
+    label: "Home Assistant (auto)",
+    colors: {
+      background: "var(--ha-card-background, var(--card-background-color))",
+      surface: "var(--card-background-color, #1f2937)",
+      text: "var(--primary-text-color)",
+      accent: "var(--primary-color)"
+    }
+  },
+  {
+    id: "midnight",
+    label: "Midnight",
+    colors: { background: "#0f172a", surface: "#1e293b", text: "#f8fafc", accent: "#60a5fa" }
+  },
+  {
+    id: "light",
+    label: "Light",
+    colors: { background: "#ffffff", surface: "#f3f4f6", text: "#111827", accent: "#2563eb" }
+  },
+  {
+    id: "sunset",
+    label: "Sunset",
+    colors: { background: "#1a1025", surface: "#2d1b3d", text: "#fde8ff", accent: "#fb7185" }
+  },
+  {
+    id: "forest",
+    label: "Forest",
+    colors: { background: "#0f1f17", surface: "#173328", text: "#e6f4ea", accent: "#34d399" }
+  },
+  {
+    id: "ocean",
+    label: "Ocean",
+    colors: { background: "#071a2b", surface: "#0f2a44", text: "#e0f2fe", accent: "#38bdf8" }
+  }
+];
+
+/**
+ * Full calendar-grid days for the month containing `selectedDate`, aligned to
+ * `weekStartDay` so every row is a complete week. When `includeAdjacentMonths`
+ * is false, only days that belong to the current month are returned (the grid
+ * may then start/end mid-week).
+ */
+export const monthGridDays = (
+  selectedDate: Date,
+  weekStartDay: 0 | 1,
+  includeAdjacentMonths = true
+): Date[] => {
+  const year = selectedDate.getFullYear();
+  const month = selectedDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const lastOfMonth = new Date(year, month + 1, 0);
+
+  const diffToStart = (firstOfMonth.getDay() - weekStartDay + 7) % 7;
+  const gridStart = new Date(firstOfMonth);
+  gridStart.setDate(firstOfMonth.getDate() - diffToStart);
+
+  const weekEndDay = (weekStartDay + 6) % 7;
+  const diffToEnd = (weekEndDay - lastOfMonth.getDay() + 7) % 7;
+  const gridEnd = new Date(lastOfMonth);
+  gridEnd.setDate(lastOfMonth.getDate() + diffToEnd);
+
+  const days: Date[] = [];
+  const cursor = new Date(gridStart);
+  cursor.setHours(0, 0, 0, 0);
+  const last = new Date(gridEnd);
+  last.setHours(0, 0, 0, 0);
+  while (cursor <= last) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return includeAdjacentMonths ? days : days.filter((day) => day.getMonth() === month);
+};
+
+/** Every individual day covered by a view's date range (day/3day/week/work_week/month). */
+export const gridDaysForView = (selectedDate: Date, view: CalendarView, weekStartDay: 0 | 1): Date[] => {
+  const { start, end } = dateRangeForView(selectedDate, view, weekStartDay);
+  const days: Date[] = [];
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setHours(0, 0, 0, 0);
+  while (cursor <= last) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+};
 
 export const dateRangeForView = (
   selectedDate: Date,
